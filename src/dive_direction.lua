@@ -131,6 +131,11 @@ local effective
 local pending
 local motion
 local activeDive
+-- Last direction produced by Dive. Unlike activeDive, this stays set after
+-- Dive movement ends, until the player turns or starts moving normally.
+local diveOverride
+-- Previous game-reported facing, used to detect an actual change.
+local lastGameFacing
 
 function M.clear()
     frame = 0
@@ -140,34 +145,28 @@ function M.clear()
     pending = nil
     motion = nil
     activeDive = nil
+    diveOverride = nil
+    lastGameFacing = nil
 end
 
 function M.getDirection()
     return effective
 end
 
--- Update the overlay's inferred facing direction once per Draw frame.
+-- Update the displayed direction on each Draw callback.
 --
--- GENERAL FLOW
--- 1. On the first observation or a plane change, initialize from game-facing.
--- 2. Compare cooldown readings and player position with the previous frame.
---    Do NOT return just because the player did not move: cooldown changes and
---    frame-based timeouts still need processing.
--- 3. If movement begins, remember its ORIGINAL starting tile in 'motion'.
--- 4. If a cooldown changes, record the inferred ability in 'pending'. Dive
---    additionally starts 'activeDive' tracking from the movement's start tile.
--- 5. While Dive is active, use (current position - original Dive start) to
---    look up facing in diveGrid. This handles intermediate Dive positions.
--- 6. Otherwise, when movement has settled:
---      - If an ability is pending, clear its state without changing facing
---        (Surge/Escape are assumed not to rotate the player).
---      - If no ability is pending and the grace period passed, treat the
---        sequence as ordinary walking/running and restore game-facing.
--- 7. Expire an ability that never produced movement, save current position,
---    and return the current effective direction.
+-- Normal movement: use PlayerEntity.facing immediately, without waiting
+-- for the character to stop walking or running.
 --
--- NOTE: Cooldown changes are prioritized Dive > Surge > Escape when multiple
--- values change in the same frame. Timing constants count Draw frames.
+-- Dive: calculate direction from the Dive start tile and the diveGrid.
+-- Keep that result in diveOverride even after Dive tracking ends. This is
+-- needed because PlayerEntity.facing may still report the OLD direction.
+--
+-- Clear the override when PlayerEntity.facing actually changes, OR when a
+-- new ordinary movement begins after the Dive movement has finished.
+-- Surge and Escape never use the Dive grid.
+--
+-- Timers below count Draw callbacks, not server ticks (600 ms).
 function M.update(x, z, plane, facing, cooldowns)
     -- Invalid position: retain the last known facing and don't advance state.
     if type(x) ~= "number" or type(z) ~= "number" then
@@ -176,12 +175,17 @@ function M.update(x, z, plane, facing, cooldowns)
 
     cooldowns = cooldowns or {}
     frame = frame + 1
+    local currentFacing = gameCompass(facing)
+    local facingChanged = currentFacing ~= nil and lastGameFacing ~= nil
+        and currentFacing ~= lastGameFacing
 
     -- Establish baseline observations on startup or when changing planes.
     if lastX == nil or plane ~= lastPlane then
         lastX, lastZ, lastPlane = x, z, plane
         lastCooldowns = copyCooldowns(cooldowns)
-        effective = gameCompass(facing)
+        effective = currentFacing
+        lastGameFacing = currentFacing
+        diveOverride = nil
         pending = nil
         motion = nil
         activeDive = nil
@@ -235,6 +239,8 @@ function M.update(x, z, plane, facing, cooldowns)
         }
 
         if kind == "dive" then
+            -- A new Dive replaces any override left by an earlier Dive.
+            diveOverride = nil
             activeDive = {
                 startX = sx,
                 startZ = sz,
@@ -246,45 +252,63 @@ function M.update(x, z, plane, facing, cooldowns)
         end
     end
 
+    -- If a Dive has stopped changing tiles for a few frames, consider its
+    -- movement finished. Do not erase its saved direction.
+    -- This separation lets a subsequent WALK clear the override without
+    -- accidentally treating intermediate Dive tiles as ordinary walking.
+    if activeDive and not moved
+        and frame - activeDive.lastMoveFrame >= SETTLE_FRAMES then
+        activeDive = nil
+        pending = nil
+        motion = nil
+    end
+
     if activeDive then
-        -- Keep the original Dive start even if the client reports multiple
-        -- positions: e.g. (0,1) first yields N, then (1,2) yields NE.
+        -- The game can report intermediate tiles during Dive. Always compare
+        -- against the ORIGINAL start tile, not the previous frame's tile.
         if moved then
             activeDive.lastMoveFrame = frame
         end
-
         local dx = x - activeDive.startX
         local dz = z - activeDive.startZ
         local direction = M.directionForOffset(dx, dz)
-
         if direction ~= nil then
+            diveOverride = direction
             effective = direction
         end
 
-        -- No movement for long enough: stop treating later movement as Dive.
-        if frame - activeDive.lastMoveFrame >= DIVE_TRACKING_FRAMES then
+        -- Safety timeout if a Dive remains active unusually long.
+        -- The override remains saved even after tracking is stopped.
+        if frame - pending.triggerFrame >= DIVE_TRACKING_FRAMES then
             activeDive = nil
             pending = nil
             motion = nil
         end
+    else
+        -- A change in the game's facing means the player actually turned.
+        -- A new tile movement after Dive is also sufficient: the game's
+        -- facing can remain numerically unchanged even when walking resumes.
+        if diveOverride ~= nil and (facingChanged or moved) then
+            diveOverride = nil
+        end
 
-    elseif motion and
-        frame - motion.lastMoveFrame >= SETTLE_FRAMES then
+        if diveOverride ~= nil then
+            -- Still standing after Dive: do NOT restore stale game-facing.
+            effective = diveOverride
+        elseif currentFacing ~= nil then
+            -- Normal walking/running or a new turn: update every frame.
+            effective = currentFacing
+        end
 
-        if pending then
-            -- A Surge/Escape (or another pending ability) was detected.
-            -- Do not overwrite the current facing using its displacement.
-            pending = nil
-            motion = nil
-
-        elseif frame - motion.lastMoveFrame >= COOLDOWN_GRACE_FRAMES then
-            -- No detected ability: interpret settled movement as walking or
-            -- running, then trust PlayerEntity.facing again.
-            local direction = gameCompass(facing)
-            if direction ~= nil then
-                effective = direction
+        -- Keep the original non-Dive ability bookkeeping. It does not delay
+        -- reading game-facing while the player is running.
+        if motion and frame - motion.lastMoveFrame >= SETTLE_FRAMES then
+            if pending then
+                pending = nil
+                motion = nil
+            elseif frame - motion.lastMoveFrame >= COOLDOWN_GRACE_FRAMES then
+                motion = nil
             end
-            motion = nil
         end
     end
 
@@ -295,6 +319,9 @@ function M.update(x, z, plane, facing, cooldowns)
         pending = nil
     end
 
+    -- Compare game-facing with the previous frame, not with the Dive angle.
+    -- A nil reading does not erase the last valid game-facing observation.
+    if currentFacing ~= nil then lastGameFacing = currentFacing end
     lastX, lastZ, lastPlane = x, z, plane
     return effective
 end

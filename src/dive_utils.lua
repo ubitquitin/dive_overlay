@@ -67,8 +67,8 @@ canStep = function(x, z, nx, nz, plane)
         else cornerFrom, cornerTo = SW, NE end
         if flagged(from, cornerFrom) or flagged(to, cornerTo) then return false end
         -- Check if we can step cardinally in X, cardinally in Z, and ordinally in X and Z
-        -- TODO: Verify that this is mechanically correct. Does diagonal movement just mean no corner or central blocking to the diagonal tile?
-        -- Because this behavior currently seems to line up very well empirically in game.
+        -- If we cannot step from nx,z to nx,nz AND x,nz to nx,nz, then we would be wall clipping.
+        -- So we must check all 4 are true for valid tile walk diagonally.
         return canStep(x, z, nx, z, plane)
            and canStep(nx, z, nx, nz, plane)
            and canStep(x, z, x, nz, plane)
