@@ -6,7 +6,19 @@ local specialCases = require("src/collision_manager/special_cases")
 local function key(a,b,c) return string.format('%d_%d_%d',a,b,c) end
 
 -- door rotation mapping
-local WALL_BY_ROTATION = {[0]=2, [1]=4, [2]=8, [3]=16}
+local WALL_BY_ROTATION = {
+    [0] = 2,  -- West
+    [1] = 4,  -- North
+    [2] = 8,  -- East
+    [3] = 16  -- South
+}
+
+local LWALL_BY_ROTATION = {
+    [0] = 2 | 4,   -- West + North = 6
+    [1] = 4 | 8,   -- North + East = 12
+    [2] = 8 | 16,  -- East + South = 24
+    [3] = 16 | 2   -- South + West = 18
+}
 local CARDINAL = 2 | 4 | 8 | 16
 
 -- Return only the collision a *visible* dynamic Loc contributes.
@@ -17,8 +29,12 @@ function M.addedCollisionMask(loc)
         return 0
     end
     local shape = loc.shape
-    -- If the location is 0, 2 or 23, then return the mapped block direction (not central blocking)
-    if shape == 0 or shape == 2 or shape == 23 then
+    -- If the location is 0 (door) then return the mapped block direction (not central blocking)
+    if shape == 0 then
+        if loc.rotation == nil then return 0 end
+        return WALL_BY_ROTATION[loc.rotation % 4] or 0
+    -- If the location is 2 (L-shape) then return the mapped block direction
+    elseif shape == 2 then
         if loc.rotation == nil then return 0 end
         return WALL_BY_ROTATION[loc.rotation % 4] or 0
     -- Otherwise return central blocking for the respective remaining shapes
@@ -43,6 +59,7 @@ function M.addVisibleWallEdges(locs, effectiveByTile)
     end
 end
 
+-- Edge case collision addition. Objects with blockwalk=0 but that do block.
 -- Mark the occupied footprint of a visible, explicitly server-blocking Loc.
 -- Entity width/length are already world-oriented, as in the Loc inspector.
 function M.applyServerBlockingLocs(locs, effectiveByTile)

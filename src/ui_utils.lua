@@ -344,10 +344,16 @@ function M.outerPerimeter(reachable)
     return border
 end
 
+-- @Seacant, not sure how you implemented but here's a stub I left that I think could ease integration.
+-- Thanks again for your help!
 
-function M.getHoveredDiveTile(playerX, playerZ, plane, reachable)
-    -- TODO: Read cursor position and resolve the selected Dive tile.
-    -- TODO: Return targetX, targetZ (world tile coordinates) OR dx dz from player.
+-- Returns the compass direction corresponding to the hovered cursor.
+-- 0=N, 45=NE, 90=E, 135=SE, 180=S, 225=SW, 270=W, 315=NW.
+-- You can just return raw angle, I convert it to direction in the next step with dive_utils.getCompassVector()
+-- Return nil if no valid direction is detected.
+function M.getHoveredDiveDirection(playerX, playerZ, plane)
+    -- TODO: Determine the cursor's direction relative to the player.
+    -- TODO: Quantize that direction to one of the 8 compass angles.
     return nil
 end
 

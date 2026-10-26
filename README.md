@@ -5,6 +5,10 @@ This repo encompasses a Runescape 3 Plugin that allows users to see a highlighte
 
 ![How it looks in game](coverphoto.png)
 
+The plugin features a few different modes including:
+    - Only highlighting the perimeter of diveable tiles
+    - Only highlighting tiles in the direction you are facing
+    - Only highlighting the tile that you will end up on when dive is active, depending on where your mouse is
 
 ## Setup
 
@@ -96,31 +100,31 @@ So if a nearby LocType has `isHidden = False` and `blockWalk != 0`, then I modif
 | :---------------- | :------: | ----: |
 | WALL_STRAIGHT        |   0   | Usually doors; Check rotation: 0 = West block, 1 = North block, 2 = East block, 3 = South block |
 | WALL_DIAGONALCORNER           |   1   | Don't add collision - NEEDS VERIFICATION (likely adds corner collision) |
-| WALL_L    |  2   | Acts like WALL_STRAIGHT until I can verify. NEEDS VERIFICATION. |
+| WALL_L    |  2   | Blocks in two directions. 0 = West+North, 1=North+East, 2=East+South, 3=South+West |
 | WALL_SQUARECORNER |  3   | Don't add collision - NEEDS VERIFICATION (likely adds corner collision) |
 | WALLDECOR_STRAIGHT_NOOFFSET       |   4   | Decor should never add collision |
 | WALLDECOR_STRAIGHT_OFFSET           |   5   | Decor should never add collision |
 | WALLDECOR_DIAGONAL_OFFSET    |  6   | Decor should never add collision |
 | WALLDECOR_DIAGONAL_NOOFFSET |  7   | Decor should never add collision |
 | WALLDECOR_DIAGONAL_BOTH        |   8   | Decor should never add collision |
-| WALL_DIAGONAL           |   9   | Adds center block (NEEDS VERIFICATION) |
+| WALL_DIAGONAL           |   9   | Adds center block   |
 | CENTREPIECE_STRAIGHT    |  10   | The most common shape. Adds center block |
 | CENTREPIECE_DIAGONAL |  11   | Adds center block |
-| ROOF_STRAIGHT        |   12   | Roofs should never add collision (NEEDS VERIFICATION) |
-| ROOF_DIAGONAL_WITH_ROOFEDGE           |   13   | Roofs should never add collision (NEEDS VERIFICATION) |
-| ROOF_DIAGONAL    |  14   | Roofs should never add collision (NEEDS VERIFICATION) |
-| ROOF_L_CONCAVE |  15   | Roofs should never add collision (NEEDS VERIFICATION) |
-| ROOF_L_CONVEX        |   16   | Roofs should never add collision (NEEDS VERIFICATION) |
-| ROOF_FLAT           |   17   | Roofs should never add collision (NEEDS VERIFICATION) |
-| ROOFEDGE_STRAIGHT    |  18   | 1Roofs should never add collision (NEEDS VERIFICATION) |
-| ROOFEDGE_DIAGONALCORNER |  19   | Roofs should never add collision (NEEDS VERIFICATION) |
-| ROOFEDGE_L        |   20   | Roofs should never add collision (NEEDS VERIFICATION) |
-| ROOFEDGE_SQUARECORNER           |   21   | Roofs should never add collision (NEEDS VERIFICATION) |
+| ROOF_STRAIGHT        |   12   | Roofs should never add collision   |
+| ROOF_DIAGONAL_WITH_ROOFEDGE           |   13   | Roofs should never add collision   |
+| ROOF_DIAGONAL    |  14   | Roofs should never add collision   |
+| ROOF_L_CONCAVE |  15   | Roofs should never add collision   |
+| ROOF_L_CONVEX        |   16   | Roofs should never add collision   |
+| ROOF_FLAT           |   17   | Roofs should never add collision   |
+| ROOFEDGE_STRAIGHT    |  18   | 1Roofs should never add collision   |
+| ROOFEDGE_DIAGONALCORNER |  19   | Roofs should never add collision   |
+| ROOFEDGE_L        |   20   | Roofs should never add collision  |
+| ROOFEDGE_SQUARECORNER           |   21   | Roofs should never add collision  |
 | GROUNDDECOR    |  22   | Decor should never add collision |
-| WALL_L_ALT |  23   | Acts like WALL_STRAIGHT until I can verify. (NEEDS VERIFICATION) |
+| WALL_L_ALT |  23   | Acts like WALL_STRAIGHT until I can verify. |
 | WALLDECOR_DIAGONAL_BOTH_ALT        |   24   | Decor should never add collision |
 
-Ultimately these are just heuristics and exceptions will likely happen when playing the game. (e.g. Dungeoneering Key Doors)
+Ultimately these are just heuristics and exceptions will likely happen when playing the game.
 
 #### Obstacles REMOVING collisions
 

@@ -8,6 +8,10 @@ local SURGE_RANGE = 10
 local DIVE_COOLDOWN_END_PLAYERVAR_ID = 6961
 local SURGE_COOLDOWN_END_PLAYERVAR_ID = 8670
 local ESC_COOLDOWN_END_PLAYERVAR_ID = 8666
+local dive_cursor_ID = 12345 -- Replace with the actual Dive cursor sprite ID
+
+-- Whether the cursor currently displays the Dive sprite.
+local isDiveCursor = false
 
 local collisionManager = require("src/collision_manager/collision_manager")
 local diveDirection = require("src/dive_direction")
@@ -26,6 +30,27 @@ end
 
 -- Calls CreateUI() to create the prettyUI Window
 uiUtils.start()
+
+
+-- MiniMenu entries are ordered from lowest to highest priority.
+-- The last entry controls the cursor when the menu is closed.
+Event.MiniMenuReady.Subscribe("diveCursorCheck", function(event)
+    isDiveCursor = false
+
+    local entries = event.miniMenu.entries
+    local entry = entries[#entries]
+
+    if not entry or not entry.cursorID or entry.cursorID < 0 then
+        return
+    end
+
+    local cursor = config.Cursor.FromID(entry.cursorID)
+
+    if cursor and cursor.spriteID == dive_cursor_ID then
+        isDiveCursor = true
+    end
+end)
+
 
 -- Creates an event that runs every frame for drawing valid Dive tiles.
 Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
@@ -97,17 +122,38 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
     -- Define perimeter tile set only for perimeter mode.
     local perimeter = uiUtils.settings.diveMode == "perimeter" and uiUtils.outerPerimeter(reachable) or nil
 
-    -- Hover mode - just get the one tile
+    -- Hover mode: only show a destination while the Dive cursor is active.
     if uiUtils.settings.diveMode == "hover" then
-        local tx, tz = uiUtils.getHoveredDiveTile(playerTileX, playerTileZ, plane, reachable)
-        if type(tx) == "number" and type(tz) == "number"
-            and tx == math.floor(tx) and tz == math.floor(tz) then
-            local ox, oz = tx - playerTileX, tz - playerTileZ
-            if reachable[ox .. "," .. oz] then
-                uiUtils.drawTile(tx, tz, plane, uiUtils.diveRGBA)
-                if uiUtils.settings.showArrows then
-                    local angle = diveDirection.directionForOffset(ox, oz)
-                    if angle ~= nil then uiUtils.drawDirectionArrow(tx, tz, plane, angle) end
+        if not isDiveCursor or MiniMenu.IsOpen() then
+            return
+        end
+        -- Get mouse hover direction
+        local angle = uiUtils.getHoveredDiveDirection(
+            playerTileX, playerTileZ, plane
+        )
+        -- Translate direction to compass direction
+        if type(angle) == "number" then
+            local dx, dz = diveUtils.compassVector(angle)
+
+            -- Search backwards for the furthest valid Dive destination.
+            for dist = RADIUS, 1, -1 do
+                local ox, oz = dx * dist, dz * dist
+                -- if the tile is reachable, highlight it.
+                if reachable[ox .. "," .. oz] then
+                    local tx = playerTileX + ox
+                    local tz = playerTileZ + oz
+
+                    uiUtils.drawTile(tx, tz, plane, uiUtils.diveRGBA)
+
+                    if uiUtils.settings.showArrows then
+                        local direction = diveDirection.directionForOffset(ox, oz)
+
+                        if direction ~= nil then
+                            uiUtils.drawDirectionArrow(tx, tz, plane, direction)
+                        end
+                    end
+                    -- stop once you get one hit
+                    break
                 end
             end
         end
@@ -158,6 +204,7 @@ end
 function PluginShutdown()
     uiUtils.shutdown()
     Event.Draw.Unsubscribe('bladedDiveTiles')
+    Event.MiniMenuReady.Unsubscribe("diveCursorCheck")
     if regionCreatedSubscribed and Event.RegionCreated.Unsubscribe then
         Event.RegionCreated.Unsubscribe('diveCollisionRegionCreated')
     end
