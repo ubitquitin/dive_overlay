@@ -1,0 +1,11 @@
+{
+  "name": "Dive_Overlay",
+  "version": "1.0.0",
+  "contactEmailAddress": "khopkar.rohan@gmail.com",
+  "hasSettingsIcon": true,
+  "hasRibbonIcon": false,
+  "requiredDependencies": {
+    "prettyui": 6398181
+  },
+  "optionalDependencies": {}
+}
