@@ -143,8 +143,6 @@ I haven't accounted for the red click case yet (on the TODOs), but I have a stat
 
 Escape distance is calculated by accessing the attack range of the player's weapon *if* a ranged weapon is equipped. Tiles are drawn as surge/escape in the direct ordinal or cardinal direction that the player is facing if they are `isDiveable() = True`.
 ## TODOs
-- rotation doesn't always update properly, likely affects onlyinfront mode.
-	- barge and prism of salvation edge cases 
 - improve performance? Sampling every frame..?
 - better compress data? https://github.com/ThirdAgeStudio/rs3-collision-map
 - Improve UI overall
