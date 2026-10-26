@@ -344,17 +344,26 @@ function M.outerPerimeter(reachable)
     return border
 end
 
--- @Seacant, not sure how you implemented but here's a stub I left that I think could ease integration.
--- Thanks again for your help!
+-- dive seems to have 2 distinct modes:
+-- 1. if within 10 tiles, it goes towards a tile directly
+-- 2. if outside of 10 tiles, it snaps to the 8 octilinear directions
+--    (N, NE, E, etc.)
+-- mode 1 returns a tile, mode 2 returns an angle
+function M.getHoveredDivePosition(playerX, playerZ)
+    local mousePos = Mouse.GetPosition()
+    local mouseTile = mousePos and ScreenConvert.ScreenToCoordGrid(mousePos)
+    if not mouseTile then return {} end
 
--- Returns the compass direction corresponding to the hovered cursor.
--- 0=N, 45=NE, 90=E, 135=SE, 180=S, 225=SW, 270=W, 315=NW.
--- You can just return raw angle, I convert it to direction in the next step with dive_utils.getCompassVector()
--- Return nil if no valid direction is detected.
-function M.getHoveredDiveDirection(playerX, playerZ, plane)
-    -- TODO: Determine the cursor's direction relative to the player.
-    -- TODO: Quantize that direction to one of the 8 compass angles.
-    return nil
+    local dx = mouseTile.x - playerX
+    local dz = mouseTile.z - playerZ
+
+    -- Grid distance: diagonal steps count as one tile
+    if math.max(math.abs(dx), math.abs(dz)) <= 10 then
+        return { tile = mouseTile }
+    end
+
+    local angle = math.deg(math.atan(dx, dz)) % 360
+    return { angle = math.floor(angle / 45 + 0.5) * 45 % 360 }
 end
 
 return M
