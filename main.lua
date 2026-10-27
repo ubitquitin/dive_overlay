@@ -87,8 +87,7 @@ local function doTick()
     -- Update the effective facing direction once per game tick.
     -- This handles ordinary movement, Dive overrides, and ability cooldowns.
     local effectiveFacing = diveDirection.update(
-        coordGrid.x, coordGrid.z, coordGrid.level,
-        self.facing,
+        self,
         {
             diveEnd = vp(DIVE_COOLDOWN_END_PLAYERVAR_ID),
             surge   = vp(SURGE_COOLDOWN_END_PLAYERVAR_ID),
@@ -111,7 +110,7 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
     end
     if reach.x == nil then return end
     local playerTileX, playerTileZ, plane, effectiveFacing = reach.x, reach.z, reach.level, reach.facing
-    
+
 
     local forward, backward = {}, {}
     local facingX, facingZ
@@ -169,6 +168,7 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
             end
         end
     end
+
 
     -- Draw Tiles based on forward, backward, reachable sets and visual toggles
     for ox = -RADIUS, RADIUS do
