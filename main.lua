@@ -54,7 +54,7 @@ end)
 -- shift as much calculation as we can into the tick so we only have to pay
 -- for it once every 600ms. This is still a noticable frame hitch and could use
 -- more optimization
-local reach = { tiles = {}, x = nil, z = nil, level = nil }
+local reach = { tiles = {}, x = nil, z = nil, level = nil, facing = nil }
 local function doTick()
     local self = PlayerList.Self()
     if self == nil then
@@ -84,8 +84,20 @@ local function doTick()
         end
     end
 
+    -- Update the effective facing direction once per game tick.
+    -- This handles ordinary movement, Dive overrides, and ability cooldowns.
+    local effectiveFacing = diveDirection.update(
+        coordGrid.x, coordGrid.z, coordGrid.level,
+        self.facing,
+        {
+            diveEnd = vp(DIVE_COOLDOWN_END_PLAYERVAR_ID),
+            surge   = vp(SURGE_COOLDOWN_END_PLAYERVAR_ID),
+            escape  = vp(ESC_COOLDOWN_END_PLAYERVAR_ID)
+        }
+    )
+
     -- Swap in one go so Draw never sees a half-built set
-    reach = { tiles = tiles, x = coordGrid.x, z = coordGrid.z, level = coordGrid.level }
+    reach = { tiles = tiles, x = coordGrid.x, z = coordGrid.z, level = coordGrid.level, facing = effectiveFacing }
 end
 
 Event.ServerLogic.Subscribe("updateCollision", doTick)
@@ -98,19 +110,8 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
         return
     end
     if reach.x == nil then return end
-    local playerTileX, playerTileZ, plane = reach.x, reach.z, reach.level
-
-    -- todo: should this also be calculated in doTick? facing direction
-    -- immediately responding to turning animation made it 'feel' better
-    -- but is probably less accurate to what you can actually surge
-    local effectiveFacing = diveDirection.update(
-        playerTileX, playerTileZ, plane, self.facing,
-        {
-            diveEnd = vp(DIVE_COOLDOWN_END_PLAYERVAR_ID),
-            surge   = vp(SURGE_COOLDOWN_END_PLAYERVAR_ID),
-            escape  = vp(ESC_COOLDOWN_END_PLAYERVAR_ID)
-        }
-    )
+    local playerTileX, playerTileZ, plane, effectiveFacing = reach.x, reach.z, reach.level, reach.facing
+    
 
     local forward, backward = {}, {}
     local facingX, facingZ

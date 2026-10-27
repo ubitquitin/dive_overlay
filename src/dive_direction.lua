@@ -16,23 +16,23 @@
 -- The cooldown values passed by main.lua correspond to:
 --   diveEnd = 6961, surge = 8670, escape = 8666.
 --
--- Timing below is measured in Draw callbacks (FRAMES), not game ticks.
+-- Timing below is measured in game ticks.
 
 local M = {}
 
 -- Translate the game's facing convention into compass degrees.
 local FACING_OFFSET_DEGREES = 180
 
--- Frames without movement before treating a movement sequence as settled.
-local SETTLE_FRAMES = 3
--- Minimum frames since the last movement before ordinary movement can restore
+-- Ticks without movement before treating a movement sequence as settled.
+local SETTLE_TICKS = 1
+-- Minimum ticks since the last movement before ordinary movement can restore
 -- PlayerEntity.facing; this gives late cooldown changes time to arrive.
-local COOLDOWN_GRACE_FRAMES = 5
+local COOLDOWN_GRACE_TICKS = 1
 -- Expire a detected Surge/Escape if no movement follows its cooldown change.
-local ABILITY_WAIT_FRAMES = 30
+local ABILITY_WAIT_TICKS = 3
 -- Continue inferring Dive facing after the last position change to accommodate
 -- intermediate Dive positions. This is NOT a permanent direction lock.
-local DIVE_TRACKING_FRAMES = 12
+local DIVE_TRACKING_TICKS = 2
 
 local N, NE, E, SE, S, SW, W, NW =
     0, 45, 90, 135, 180, 225, 270, 315
@@ -257,7 +257,7 @@ function M.update(x, z, plane, facing, cooldowns)
     -- This separation lets a subsequent WALK clear the override without
     -- accidentally treating intermediate Dive tiles as ordinary walking.
     if activeDive and not moved
-        and frame - activeDive.lastMoveFrame >= SETTLE_FRAMES then
+        and frame - activeDive.lastMoveFrame >= SETTLE_TICKS then
         activeDive = nil
         pending = nil
         motion = nil
@@ -279,7 +279,7 @@ function M.update(x, z, plane, facing, cooldowns)
 
         -- Safety timeout if a Dive remains active unusually long.
         -- The override remains saved even after tracking is stopped.
-        if frame - pending.triggerFrame >= DIVE_TRACKING_FRAMES then
+        if frame - pending.triggerFrame >= DIVE_TRACKING_TICKS then
             activeDive = nil
             pending = nil
             motion = nil
@@ -302,11 +302,11 @@ function M.update(x, z, plane, facing, cooldowns)
 
         -- Keep the original non-Dive ability bookkeeping. It does not delay
         -- reading game-facing while the player is running.
-        if motion and frame - motion.lastMoveFrame >= SETTLE_FRAMES then
+        if motion and frame - motion.lastMoveFrame >= SETTLE_TICKS then
             if pending then
                 pending = nil
                 motion = nil
-            elseif frame - motion.lastMoveFrame >= COOLDOWN_GRACE_FRAMES then
+            elseif frame - motion.lastMoveFrame >= COOLDOWN_GRACE_TICKS then
                 motion = nil
             end
         end
@@ -315,7 +315,7 @@ function M.update(x, z, plane, facing, cooldowns)
     -- Cooldown may arrive before movement. Drop a pending non-Dive ability
     -- after waiting long enough with no tracked movement.
     if pending and not activeDive and not motion
-        and frame - pending.triggerFrame >= ABILITY_WAIT_FRAMES then
+        and frame - pending.triggerFrame >= ABILITY_WAIT_TICKS then
         pending = nil
     end
 
