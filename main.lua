@@ -51,6 +51,45 @@ Event.MiniMenuReady.Subscribe("diveCursorCheck", function(event)
 end)
 
 
+-- shift as much calculation as we can into the tick so we only have to pay
+-- for it once every 600ms. This is still a noticable frame hitch and could use
+-- more optimization
+local reach = { tiles = {}, x = nil, z = nil, level = nil }
+local function doTick()
+    local self = PlayerList.Self()
+    if self == nil then
+        diveDirection.clear()
+        return
+    end
+
+    -- routeEnd feels like a shortcut to 'where you will be next tick'
+    -- which feels more accurate to what your dive is going to base on
+    local coordGrid = self.routeEnd or self.coordGrid
+
+    -- Fetch the static collision data
+    collisionManager.update(coordGrid.x, coordGrid.z, coordGrid.level)
+    -- Update static collision data with dynamic collision data heuristics from locEntities
+    collisionManager.updateLocs(coordGrid, RADIUS + 2)
+
+    local tiles = {}
+    for ox = -RADIUS, RADIUS do
+        for oz = -RADIUS, RADIUS do
+            if (ox ~= 0 or oz ~= 0)
+                and diveUtils.isDiveable(
+                    coordGrid.x, coordGrid.z,
+                    coordGrid.x + ox, coordGrid.z + oz, coordGrid.level
+                ) then
+                tiles[ox .. "," .. oz] = true
+            end
+        end
+    end
+
+    -- Swap in one go so Draw never sees a half-built set
+    reach = { tiles = tiles, x = coordGrid.x, z = coordGrid.z, level = coordGrid.level }
+end
+
+Event.ServerLogic.Subscribe("updateCollision", doTick)
+
 -- Creates an event that runs every frame for drawing valid Dive tiles.
 Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
     local self = PlayerList.Self()
@@ -58,66 +97,43 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
         diveDirection.clear()
         return
     end
+    if reach.x == nil then return end
+    local playerTileX, playerTileZ, plane = reach.x, reach.z, reach.level
 
-    -- Get player and grid information
-    local pos = self.position
-    local playerTileX = math.floor(pos.x / TILE_SIZE)
-    local playerTileZ = math.floor(pos.z / TILE_SIZE)
-    local grid = self.coordGrid
-    local plane = grid and grid.level
-    if plane == nil then
-        diveDirection.clear()
-        return
-    end
-
-    -- Fetch the static collision data
-    collisionManager.update(playerTileX, playerTileZ, plane)
-    -- Update static collision data with dynamic collision data heuristics from locEntities
-    collisionManager.updateLocs(grid, RADIUS + 2)
-
-    -- Calculate effective player direction using playerEntity.facing OR
-    -- diveDirection utilities if the player has just used a movement ability.
+    -- todo: should this also be calculated in doTick? facing direction
+    -- immediately responding to turning animation made it 'feel' better
+    -- but is probably less accurate to what you can actually surge
     local effectiveFacing = diveDirection.update(
         playerTileX, playerTileZ, plane, self.facing,
-        { diveEnd = vp(DIVE_COOLDOWN_END_PLAYERVAR_ID), surge = vp(SURGE_COOLDOWN_END_PLAYERVAR_ID), escape = vp(ESC_COOLDOWN_END_PLAYERVAR_ID) }
+        {
+            diveEnd = vp(DIVE_COOLDOWN_END_PLAYERVAR_ID),
+            surge   = vp(SURGE_COOLDOWN_END_PLAYERVAR_ID),
+            escape  = vp(ESC_COOLDOWN_END_PLAYERVAR_ID)
+        }
     )
 
-    -- Get tiles directly in front and directly behind player based on effective Direction.
-    -- These tiles will be used for surge and dive highlighting.
     local forward, backward = {}, {}
+    local facingX, facingZ
     if type(effectiveFacing) == "number" then
         local dx, dz = diveUtils.compassVector(effectiveFacing)
-        forward = diveUtils.traceStraightLine(playerTileX, playerTileZ, dx, dz, plane, SURGE_RANGE)
-        backward = diveUtils.traceStraightLine(playerTileX, playerTileZ, -dx, -dz, plane, diveUtils.getEscapeDistance())
-    end
-
-    -- Get the player's effective facing as a compass direction vector.
-    -- This is used by ui_utils.lua to filter Dive tiles behind the player.
-    -- We use the same effective facing already calculated for Surge/Escape.
-    local facingX, facingZ
-    if uiUtils.settings.hideBehind and type(effectiveFacing) == "number" then
-        facingX, facingZ = diveUtils.compassVector(effectiveFacing)
-    end
-
-    -- Find all reachable Dive tiles within the 10-tile radius.
-    -- Apply the Hide Behind display filter before checking reachability.
-    local reachable = {}
-
-    -- Get all Diveable tiles
-    for ox = -RADIUS, RADIUS do
-        for oz = -RADIUS, RADIUS do
-            if (ox ~= 0 or oz ~= 0)
-                and uiUtils.isTileInFront(ox, oz, facingX, facingZ)
-                and diveUtils.isDiveable(
-                    playerTileX, playerTileZ,
-                    playerTileX + ox, playerTileZ + oz, plane
-                ) then
-                reachable[ox .. "," .. oz] = true
-            end
+        forward      = diveUtils.traceStraightLine(playerTileX, playerTileZ, dx, dz, plane, SURGE_RANGE)
+        backward     = diveUtils.traceStraightLine(playerTileX, playerTileZ, -dx, -dz, plane,
+            diveUtils.getEscapeDistance())
+        if uiUtils.settings.hideBehind then
+            facingX, facingZ = dx, dz
         end
     end
 
-    -- Define perimeter tile set only for perimeter mode.
+    -- Apply the Hide Behind filter to the tick's diveable set
+    local reachable = {}
+    for key in pairs(reach.tiles) do
+        local ox, oz = key:match("^(-?%d+),(-?%d+)$")
+        ox, oz = tonumber(ox), tonumber(oz)
+        if uiUtils.isTileInFront(ox, oz, facingX, facingZ) then
+            reachable[key] = true
+        end
+    end
+
     local perimeter = uiUtils.settings.diveMode == "perimeter" and uiUtils.outerPerimeter(reachable) or nil
 
     -- Hover mode: only show a destination while the Dive cursor is active.
