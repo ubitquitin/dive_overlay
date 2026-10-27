@@ -8,7 +8,8 @@ local SURGE_RANGE = 10
 local DIVE_COOLDOWN_END_PLAYERVAR_ID = 6961
 local SURGE_COOLDOWN_END_PLAYERVAR_ID = 8670
 local ESC_COOLDOWN_END_PLAYERVAR_ID = 8666
-local dive_cursor_ID = 12345 -- Replace with the actual Dive cursor sprite ID
+local DIVE_CURSOR_ID = 157
+local BLADED_DIVE_CURSOR_ID = 42
 
 -- Whether the cursor currently displays the Dive sprite.
 local isDiveCursor = false
@@ -44,9 +45,7 @@ Event.MiniMenuReady.Subscribe("diveCursorCheck", function(event)
         return
     end
 
-    local cursor = config.Cursor.FromID(entry.cursorID)
-
-    if cursor and cursor.spriteID == dive_cursor_ID then
+    if entry.cursorID == BLADED_DIVE_CURSOR_ID or entry.cursorID == DIVE_CURSOR_ID then
         isDiveCursor = true
     end
 end)
@@ -113,7 +112,6 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
                     playerTileX, playerTileZ,
                     playerTileX + ox, playerTileZ + oz, plane
                 ) then
-
                 reachable[ox .. "," .. oz] = true
             end
         end
@@ -123,41 +121,36 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
     local perimeter = uiUtils.settings.diveMode == "perimeter" and uiUtils.outerPerimeter(reachable) or nil
 
     -- Hover mode: only show a destination while the Dive cursor is active.
+    local hoverPath = {}
     if uiUtils.settings.diveMode == "hover" then
-        if not isDiveCursor or MiniMenu.IsOpen() then
-            return
-        end
-        -- Get mouse hover direction
-        local angle = uiUtils.getHoveredDiveDirection(
-            playerTileX, playerTileZ, plane
-        )
-        -- Translate direction to compass direction
-        if type(angle) == "number" then
-            local dx, dz = diveUtils.compassVector(angle)
+        if isDiveCursor and not MiniMenu.IsOpen() then
+            -- Get mouse hover direction
+            local diveResult = uiUtils.getHoveredDivePosition(
+                playerTileX, playerTileZ
+            )
+            -- if an angle was returned, find the furthest tile in that
+            -- direction
+            if diveResult.angle then
+                -- turn our angle into tile offsets
+                local dx, dz = diveUtils.compassVector(diveResult.angle)
 
-            -- Search backwards for the furthest valid Dive destination.
-            for dist = RADIUS, 1, -1 do
-                local ox, oz = dx * dist, dz * dist
-                -- if the tile is reachable, highlight it.
-                if reachable[ox .. "," .. oz] then
-                    local tx = playerTileX + ox
-                    local tz = playerTileZ + oz
-
-                    uiUtils.drawTile(tx, tz, plane, uiUtils.diveRGBA)
-
-                    if uiUtils.settings.showArrows then
-                        local direction = diveDirection.directionForOffset(ox, oz)
-
-                        if direction ~= nil then
-                            uiUtils.drawDirectionArrow(tx, tz, plane, direction)
-                        end
+                -- Search backwards for the furthest valid Dive destination.
+                for dist = RADIUS, 1, -1 do
+                    local ox, oz = dx * dist, dz * dist
+                    if reachable[ox .. "," .. oz] then
+                        hoverPath[ox .. "," .. oz] = true
+                        -- break if you only want the last tile
+                        break
                     end
-                    -- stop once you get one hit
-                    break
+                end
+            else
+                if diveResult.tile then
+                    -- translate player coordinates back to offset coordinates
+                    local ox, oz = diveResult.tile.x - playerTileX, diveResult.tile.z - playerTileZ
+                    hoverPath[ox .. "," .. oz] = true
                 end
             end
         end
-        return
     end
 
     -- Draw Tiles based on forward, backward, reachable sets and visual toggles
@@ -166,7 +159,11 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
             local tx, tz = playerTileX + ox, playerTileZ + oz
             local key = tx .. "," .. tz
             local diveVisible = reachable[ox .. "," .. oz]
-                and (uiUtils.settings.diveMode == "all" or perimeter[ox .. "," .. oz])
+                and (
+                    uiUtils.settings.diveMode == "all" or
+                    (perimeter ~= nil and perimeter[ox .. "," .. oz]) or
+                    (hoverPath ~= nil and hoverPath[ox .. "," .. oz])
+                )
             if uiUtils.settings.showSurge and forward[key] then
                 uiUtils.drawTile(tx, tz, plane, uiUtils.surgeRGBA)
             elseif uiUtils.settings.showEscape and backward[key] then
