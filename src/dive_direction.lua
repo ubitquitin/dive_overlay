@@ -16,23 +16,23 @@
 -- The cooldown values passed by main.lua correspond to:
 --   diveEnd = 6961, surge = 8670, escape = 8666.
 --
--- Timing below is measured in Draw callbacks (FRAMES), not game ticks.
+-- Timing below is measured in game ticks.
 
 local M = {}
 
 -- Translate the game's facing convention into compass degrees.
 local FACING_OFFSET_DEGREES = 180
 
--- Frames without movement before treating a movement sequence as settled.
-local SETTLE_FRAMES = 3
--- Minimum frames since the last movement before ordinary movement can restore
+-- Ticks without movement before treating a movement sequence as settled.
+local SETTLE_TICKS = 1
+-- Minimum ticks since the last movement before ordinary movement can restore
 -- PlayerEntity.facing; this gives late cooldown changes time to arrive.
-local COOLDOWN_GRACE_FRAMES = 5
+local COOLDOWN_GRACE_TICKS = 1
 -- Expire a detected Surge/Escape if no movement follows its cooldown change.
-local ABILITY_WAIT_FRAMES = 30
+local ABILITY_WAIT_TICKS = 3
 -- Continue inferring Dive facing after the last position change to accommodate
 -- intermediate Dive positions. This is NOT a permanent direction lock.
-local DIVE_TRACKING_FRAMES = 12
+local DIVE_TRACKING_TICKS = 2
 
 local N, NE, E, SE, S, SW, W, NW =
     0, 45, 90, 135, 180, 225, 270, 315
@@ -153,6 +153,97 @@ function M.getDirection()
     return effective
 end
 
+-- given 2 tiles next to each other, return the 'angle' you will be at
+-- when walking from one to the next based on their x,z offsets from each other
+local COMPASS = {
+    --  x movement, then Z movement
+    [0] = { [1] = 0, [-1] = 180 },
+    [1] = { [1] = 45, [0] = 90, [-1] = 135 },
+    [-1] = { [1] = 315, [0] = 270, [-1] = 225 },
+}
+
+local function sign(n)
+    return n > 0 and 1 or (n < 0 and -1 or 0)
+end
+
+local function isDiagonalStep(dx, dz)
+    return math.abs(dx) == 1 and math.abs(dz) == 1
+end
+
+-- The only split forms seen in testing: SE as E-then-S, NW as N-then-W.
+local function isSplitDiagonal(a, mid, b)
+    local fx, fz = mid.x - a.x, mid.z - a.z
+    local sx, sz = b.x - mid.x, b.z - mid.z
+    return (fx == 1 and fz == 0 and sx == 0 and sz == -1) -- E then S
+        or (fx == 0 and fz == 1 and sx == -1 and sz == 0) -- N then W
+end
+
+-- Compass direction the player will be facing at the end of this tick's
+-- movement, from coordGrid (where they are) and route (the next few tiles).
+--
+-- Route quirks this handles:
+--   * S/W/SW moves start the route with the current tile; it's skipped.
+--   * SE and NW diagonals are always split into two entries (SE: E then S,
+--     NW: N then W). NE and SW diagonals are a single entry.
+--   * Running into a split diagonal after a straight step (SSE, SEE, NNW,
+--     WNW) can end a tick on the half-step, leaving one straight step that
+--     is really the rest of the diagonal. `previous` (last tick's result)
+--     is used to recognise that case.
+--   * Walking around the NE corner of an obstacle (E then S, or N then W)
+--     gives exactly the same route as a split diagonal. On the first tick
+--     there's no way to tell them apart, so it wrongly predicts the diagonal.
+--     On the next tick the player is standing on the corner tile, and
+--     facingTarget shows the real straight direction, so that tick is right.
+--
+-- dev note: this sucked. I am still stumped as to why the route information is
+-- asymmetrical and why all of these workarounds were needed, but I'm happy enough
+-- with the end results outside of the 1 known mis-prediction,
+local function routeCompass(player, previous)
+    local here = player.coordGrid
+    if not here then return nil end
+    local route = player.route or {}
+
+    -- Path: current tile, then the route without consecutive duplicates
+    local path = { here }
+    for _, c in ipairs(route) do
+        local last = path[#path]
+        if c.x ~= last.x or c.z ~= last.z then
+            path[#path + 1] = c
+        end
+    end
+
+    local n = #path
+    if n < 2 then return nil end
+
+    -- Last real step: a single diagonal entry, a split diagonal across the
+    -- last two entries, or a straight step
+    local last, prev = path[n], path[n - 1]
+    local dx, dz = last.x - prev.x, last.z - prev.z
+    if not isDiagonalStep(dx, dz) and n >= 3
+        and isSplitDiagonal(path[n - 2], prev, last) then
+        dx, dz = last.x - path[n - 2].x, last.z - path[n - 2].z
+    end
+    local result = COMPASS[sign(dx)][sign(dz)]
+
+    -- Landed on the half-step of last tick's SE/NW diagonal: the route is a
+    -- single straight entry (no leading current tile) finishing that diagonal
+    local onHalfStep = #route == 1
+        and ((result == 180 and previous == 135)
+            or (result == 270 and previous == 315))
+    if onHalfStep then
+        -- Corner turn vs half-step of a split diagonal: same route shape.
+        -- By this tick facingTarget reflects the step actually being taken.
+        local target = (player.facingTarget + 180) % 360
+        target = math.floor(target / 45 + 0.5) * 45 % 360
+        if target == result then
+            return result -- corner: really walking straight now
+        end
+        return previous -- half-step: still finishing the diagonal
+    end
+
+    return result
+end
+
 -- Update the displayed direction on each Draw callback.
 --
 -- Normal movement: use PlayerEntity.facing immediately, without waiting
@@ -167,11 +258,15 @@ end
 -- Surge and Escape never use the Dive grid.
 --
 -- Timers below count Draw callbacks, not server ticks (600 ms).
-function M.update(x, z, plane, facing, cooldowns)
-    -- Invalid position: retain the last known facing and don't advance state.
-    if type(x) ~= "number" or type(z) ~= "number" then
+function M.update(player, cooldowns)
+    local grid = player and player.coordGrid
+    if not grid then
         return effective
     end
+
+    local x, z, plane = grid.x, grid.z, grid.level
+    local facing = player.facing
+    local routeFacing = routeCompass(player, effective)
 
     cooldowns = cooldowns or {}
     frame = frame + 1
@@ -257,7 +352,7 @@ function M.update(x, z, plane, facing, cooldowns)
     -- This separation lets a subsequent WALK clear the override without
     -- accidentally treating intermediate Dive tiles as ordinary walking.
     if activeDive and not moved
-        and frame - activeDive.lastMoveFrame >= SETTLE_FRAMES then
+        and frame - activeDive.lastMoveFrame >= SETTLE_TICKS then
         activeDive = nil
         pending = nil
         motion = nil
@@ -279,7 +374,7 @@ function M.update(x, z, plane, facing, cooldowns)
 
         -- Safety timeout if a Dive remains active unusually long.
         -- The override remains saved even after tracking is stopped.
-        if frame - pending.triggerFrame >= DIVE_TRACKING_FRAMES then
+        if frame - pending.triggerFrame >= DIVE_TRACKING_TICKS then
             activeDive = nil
             pending = nil
             motion = nil
@@ -288,25 +383,31 @@ function M.update(x, z, plane, facing, cooldowns)
         -- A change in the game's facing means the player actually turned.
         -- A new tile movement after Dive is also sufficient: the game's
         -- facing can remain numerically unchanged even when walking resumes.
-        if diveOverride ~= nil and (facingChanged or moved) then
+        -- A fresh route also counts: the player has asked to move, even if
+        -- they haven't left the tile yet.
+        if diveOverride ~= nil and (facingChanged or moved or routeFacing ~= nil) then
             diveOverride = nil
         end
 
         if diveOverride ~= nil then
             -- Still standing after Dive: do NOT restore stale game-facing.
             effective = diveOverride
+        elseif routeFacing ~= nil then
+            -- Walking/running: the route leads the character model's turn
+            -- animation, so prefer it over PlayerEntity.facing.
+            effective = routeFacing
         elseif currentFacing ~= nil then
-            -- Normal walking/running or a new turn: update every frame.
+            -- Standing still or turning in place.
             effective = currentFacing
         end
 
         -- Keep the original non-Dive ability bookkeeping. It does not delay
         -- reading game-facing while the player is running.
-        if motion and frame - motion.lastMoveFrame >= SETTLE_FRAMES then
+        if motion and frame - motion.lastMoveFrame >= SETTLE_TICKS then
             if pending then
                 pending = nil
                 motion = nil
-            elseif frame - motion.lastMoveFrame >= COOLDOWN_GRACE_FRAMES then
+            elseif frame - motion.lastMoveFrame >= COOLDOWN_GRACE_TICKS then
                 motion = nil
             end
         end
@@ -315,7 +416,7 @@ function M.update(x, z, plane, facing, cooldowns)
     -- Cooldown may arrive before movement. Drop a pending non-Dive ability
     -- after waiting long enough with no tracked movement.
     if pending and not activeDive and not motion
-        and frame - pending.triggerFrame >= ABILITY_WAIT_FRAMES then
+        and frame - pending.triggerFrame >= ABILITY_WAIT_TICKS then
         pending = nil
     end
 
