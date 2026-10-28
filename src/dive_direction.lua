@@ -203,6 +203,16 @@ local function routeCompass(player, previous)
     local n = #path
     if n < 2 then return nil end
 
+    -- escape (and only escape?) sets your route which this method was
+    -- interpreting as you walking backwards (and thus changing your angle)
+    -- This tries to detect it based on distance and return early
+    -- note: this will show the wrong facing angle if you escape exactly 1 tile
+    -- for 1 tick (skill issue)
+    local first = path[2]
+    if gridDistance(first.x - here.x, first.z - here.z) > 1 then
+        return nil
+    end
+
     -- Last real step: a single diagonal entry, a split diagonal across the
     -- last two entries, or a straight step
     local last, prev = path[n], path[n - 1]
