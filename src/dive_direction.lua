@@ -22,47 +22,38 @@ local M = {}
 
 -- Translate the game's facing convention into compass degrees.
 local FACING_OFFSET_DEGREES = 180
+local LONG_MOVE_DISTANCE = 9
 
--- Ticks without movement before treating a movement sequence as settled.
-local SETTLE_TICKS = 1
--- Minimum ticks since the last movement before ordinary movement can restore
--- PlayerEntity.facing; this gives late cooldown changes time to arrive.
-local COOLDOWN_GRACE_TICKS = 1
--- Expire a detected Surge/Escape if no movement follows its cooldown change.
-local ABILITY_WAIT_TICKS = 3
--- Continue inferring Dive facing after the last position change to accommodate
--- intermediate Dive positions. This is NOT a permanent direction lock.
-local DIVE_TRACKING_TICKS = 2
 
-local N, NE, E, SE, S, SW, W, NW =
-    0, 45, 90, 135, 180, 225, 270, 315
+local N, NE, E, SE, S, SW, W, NW, X =
+    0, 45, 90, 135, 180, 225, 270, 315, false
 
 -- Empirical Dive-facing lookup for every destination offset within +/-10 tiles.
 -- Row 1 is dz=+10 (north), row 21 is dz=-10 (south).
 -- Column 1 is dx=-10 (west), column 21 is dx=+10 (east).
 -- The center cell represents no movement and deliberately contains false.
 local diveGrid = {
-    {NW,NW,NW,NW,NW,N, N, N, N, N, N, N, N, N, N, NE,NE,NE,NE,NE,NE},
-    {NW,NW,NW,NW,NW,NW,N, N, N, N, N, N, N, N, NE,NE,NE,NE,NE,NE,NE},
-    {NW,NW,NW,NW,NW,NW,NW,N, N, N, N, N, N, NE,NE,NE,NE,NE,NE,NE,NE},
-    {NW,NW,NW,NW,NW,NW,NW,NW,N, N, N, N, NE,NE,NE,NE,NE,NE,NE,NE,NE},
-    {NW,NW,NW,NW,NW,NW,NW,NW,NW,N, N, N, NE,NE,NE,NE,NE,NE,NE,NE,NE},
-    {NW,NW,NW,NW,NW,NW,NW,NW,NW,N, N, N, NE,NE,NE,NE,NE,NE,NE,NE,NE},
-    {W, W, NW,NW,NW,NW,NW,NW,NW,NW,N, NE,NE,NE,NE,NE,NE,NE,NE,E, E},
-    {W, W, W, NW,NW,NW,NW,NW,NW,NW,N, NE,NE,NE,NE,NE,NE,NE,E, E, E},
-    {W, W, W, W, W, NW,NW,NW,NW,NW,N, NE,NE,NE,NE,NE,E, E, E, E, E},
-    {W, W, W, W, W, W, W, W, NW,NW,N, NE,NE,E, E, E, E, E, E, E, E},
-    {W, W, W, W, W, W, W, W, W, W, false, E, E, E, E, E, E, E, E, E, E},
-    {W, W, W, W, W, W, W, W, SW,SW,S, SE,SE,E, E, E, E, E, E, E, E},
-    {W, W, W, W, W, SW,SW,SW,SW,SW,S, SE,SE,SE,SE,SE,E, E, E, E, E},
-    {W, W, W, SW,SW,SW,SW,SW,SW,SW,S, SE,SE,SE,SE,SE,SE,SE,E, E, E},
-    {W, W, SW,SW,SW,SW,SW,SW,SW,SW,S, SE,SE,SE,SE,SE,SE,SE,SE,E, E},
-    {SW,SW,SW,SW,SW,SW,SW,SW,SW,S, S, S, SE,SE,SE,SE,SE,SE,SE,SE,SE},
-    {SW,SW,SW,SW,SW,SW,SW,SW,SW,S, S, S, SE,SE,SE,SE,SE,SE,SE,SE,SE},
-    {SW,SW,SW,SW,SW,SW,SW,SW,S, S, S, S, S, SE,SE,SE,SE,SE,SE,SE,SE},
-    {SW,SW,SW,SW,SW,SW,SW,S, S, S, S, S, S, S, SE,SE,SE,SE,SE,SE,SE},
-    {SW,SW,SW,SW,SW,SW,S, S, S, S, S, S, S, S, S, SE,SE,SE,SE,SE,SE},
-    {SW,SW,SW,SW,SW,S, S, S, S, S, S, S, S, S, S, S, SE,SE,SE,SE,SE}
+    { NW, NW, NW, NW, NW, N,  N,  N,  N,  N,  N, N,  N,  N,  N,  NE, NE, NE, NE, NE, NE },
+    { NW, NW, NW, NW, NW, NW, N,  N,  N,  N,  N, N,  N,  N,  NE, NE, NE, NE, NE, NE, NE },
+    { NW, NW, NW, NW, NW, NW, NW, N,  N,  N,  N, N,  N,  NE, NE, NE, NE, NE, NE, NE, NE },
+    { NW, NW, NW, NW, NW, NW, NW, NW, N,  N,  N, N,  NE, NE, NE, NE, NE, NE, NE, NE, NE },
+    { NW, NW, NW, NW, NW, NW, NW, NW, NW, N,  N, N,  NE, NE, NE, NE, NE, NE, NE, NE, NE },
+    { NW, NW, NW, NW, NW, NW, NW, NW, NW, N,  N, N,  NE, NE, NE, NE, NE, NE, NE, NE, NE },
+    { W,  W,  NW, NW, NW, NW, NW, NW, NW, NW, N, NE, NE, NE, NE, NE, NE, NE, NE, E,  E },
+    { W,  W,  W,  NW, NW, NW, NW, NW, NW, NW, N, NE, NE, NE, NE, NE, NE, NE, E,  E,  E },
+    { W,  W,  W,  W,  W,  NW, NW, NW, NW, NW, N, NE, NE, NE, NE, NE, E,  E,  E,  E,  E },
+    { W,  W,  W,  W,  W,  W,  W,  W,  NW, NW, N, NE, NE, E,  E,  E,  E,  E,  E,  E,  E },
+    { W,  W,  W,  W,  W,  W,  W,  W,  W,  W,  X, E,  E,  E,  E,  E,  E,  E,  E,  E,  E },
+    { W,  W,  W,  W,  W,  W,  W,  W,  SW, SW, S, SE, SE, E,  E,  E,  E,  E,  E,  E,  E },
+    { W,  W,  W,  W,  W,  SW, SW, SW, SW, SW, S, SE, SE, SE, SE, SE, E,  E,  E,  E,  E },
+    { W,  W,  W,  SW, SW, SW, SW, SW, SW, SW, S, SE, SE, SE, SE, SE, SE, SE, E,  E,  E },
+    { W,  W,  SW, SW, SW, SW, SW, SW, SW, SW, S, SE, SE, SE, SE, SE, SE, SE, SE, E,  E },
+    { SW, SW, SW, SW, SW, SW, SW, SW, SW, S,  S, S,  SE, SE, SE, SE, SE, SE, SE, SE, SE },
+    { SW, SW, SW, SW, SW, SW, SW, SW, SW, S,  S, S,  SE, SE, SE, SE, SE, SE, SE, SE, SE },
+    { SW, SW, SW, SW, SW, SW, SW, SW, S,  S,  S, S,  S,  SE, SE, SE, SE, SE, SE, SE, SE },
+    { SW, SW, SW, SW, SW, SW, SW, S,  S,  S,  S, S,  S,  S,  SE, SE, SE, SE, SE, SE, SE },
+    { SW, SW, SW, SW, SW, SW, S,  S,  S,  S,  S, S,  S,  S,  S,  SE, SE, SE, SE, SE, SE },
+    { SW, SW, SW, SW, SW, S,  S,  S,  S,  S,  S, S,  S,  S,  S,  S,  SE, SE, SE, SE, SE }
 }
 
 -- Look up the facing that Dive produces for a relative tile offset.
@@ -76,9 +67,10 @@ function M.directionForOffset(dx, dz)
         return nil
     end
 
-    if math.abs(dx) > 10 or math.abs(dz) > 10 then
-        return nil -- TODO: Handle attempted destinations outside Dive range.
-    end
+    -- Diving while running in the same direction can push the tick's offset
+    -- past the edge, where directions are broad enough that it rarely matters.
+    dx = math.max(-10, math.min(10, dx))
+    dz = math.max(-10, math.min(10, dz))
 
     if dx == 0 and dz == 0 then
         return nil
@@ -113,38 +105,34 @@ local function copyCooldowns(c)
     }
 end
 
+local function gridDistance(dx, dz)
+    return math.max(math.abs(dx), math.abs(dz))
+end
+
 -- Persistent state between Draw frames:
--- frame:         count of processed Draw callbacks since clear().
 -- lastX/Z/Plane: position from the previous successful update.
 -- lastCooldowns: most recent numeric readings for cooldown-change detection.
 -- effective:     direction currently displayed by the overlay.
--- pending:       recently detected ability, with its starting tile and trigger
---                frame; needed because cooldowns and movement may arrive apart.
--- motion:        a sequence of position changes, with its original tile and
---                last movement frame; ordinary walking also creates motion.
--- activeDive:    Dive-specific sequence whose ORIGINAL start tile must be kept
---                while the player moves through intermediate Dive positions.
-local frame
 local lastX, lastZ, lastPlane
 local lastCooldowns
 local effective
-local pending
-local motion
-local activeDive
 -- Last direction produced by Dive. Unlike activeDive, this stays set after
 -- Dive movement ends, until the player turns or starts moving normally.
 local diveOverride
 -- Previous game-reported facing, used to detect an actual change.
 local lastGameFacing
 
+-- For movements >= 9 tiles, our surge/dive/escape cooldown signals lag behind
+-- 1 server logic tick. This extra state allows us to report the correct
+-- diveOverride for those cases
+local lastDX, lastDZ = 0, 0
+local jumpPending = false
+
 function M.clear()
-    frame = 0
     lastX, lastZ, lastPlane = nil, nil, nil
     lastCooldowns = nil
     effective = nil
-    pending = nil
-    motion = nil
-    activeDive = nil
+    jumpPending = false
     diveOverride = nil
     lastGameFacing = nil
 end
@@ -244,7 +232,7 @@ local function routeCompass(player, previous)
     return result
 end
 
--- Update the displayed direction on each Draw callback.
+-- Update the displayed direction on each ServerLogic Tick
 --
 -- Normal movement: use PlayerEntity.facing immediately, without waiting
 -- for the character to stop walking or running.
@@ -256,8 +244,6 @@ end
 -- Clear the override when PlayerEntity.facing actually changes, OR when a
 -- new ordinary movement begins after the Dive movement has finished.
 -- Surge and Escape never use the Dive grid.
---
--- Timers below count Draw callbacks, not server ticks (600 ms).
 function M.update(player, cooldowns)
     local grid = player and player.coordGrid
     if not grid then
@@ -269,7 +255,6 @@ function M.update(player, cooldowns)
     local routeFacing = routeCompass(player, effective)
 
     cooldowns = cooldowns or {}
-    frame = frame + 1
     local currentFacing = gameCompass(facing)
     local facingChanged = currentFacing ~= nil and lastGameFacing ~= nil
         and currentFacing ~= lastGameFacing
@@ -277,13 +262,12 @@ function M.update(player, cooldowns)
     -- Establish baseline observations on startup or when changing planes.
     if lastX == nil or plane ~= lastPlane then
         lastX, lastZ, lastPlane = x, z, plane
+        lastDX, lastDZ = 0, 0
+        jumpPending = false
         lastCooldowns = copyCooldowns(cooldowns)
         effective = currentFacing
         lastGameFacing = currentFacing
         diveOverride = nil
-        pending = nil
-        motion = nil
-        activeDive = nil
         return effective
     end
 
@@ -292,105 +276,50 @@ function M.update(player, cooldowns)
     local dive = changed(cooldowns, lastCooldowns, "diveEnd")
     local surge = changed(cooldowns, lastCooldowns, "surge")
     local escape = changed(cooldowns, lastCooldowns, "escape")
+    local ability = dive or surge or escape
 
     -- Keep the previous valid value if a cooldown temporarily reads nil.
-    for _, key in ipairs({"diveEnd", "surge", "escape"}) do
+    for _, key in ipairs({ "diveEnd", "surge", "escape" }) do
         if type(cooldowns[key]) == "number" then
             lastCooldowns[key] = cooldowns[key]
         end
     end
 
-    local moved = x ~= lastX or z ~= lastZ
+    local dx, dz = x - lastX, z - lastZ
+    local moved = dx ~= 0 or dz ~= 0
 
-    -- Track consecutive position updates as one movement sequence.
-    -- Its starting tile matters if a cooldown change is reported after the
-    -- first movement frame, or if Dive moves through intermediate tiles.
-    if moved then
-        if not motion then
-            motion = {
-                startX = lastX,
-                startZ = lastZ,
-                lastMoveFrame = frame
-            }
-        end
-        motion.lastMoveFrame = frame
-    end
-
-    if dive or surge or escape then
-        -- Preserve existing priority if multiple cooldowns change together.
-        local kind = dive and "dive"
-            or (surge and "surge" or "escape")
-
-        -- Prefer the movement sequence's original tile; otherwise use the
-        -- position immediately before the cooldown changed.
-        local sx = motion and motion.startX or lastX
-        local sz = motion and motion.startZ or lastZ
-
-        pending = {
-            kind = kind,
-            startX = sx,
-            startZ = sz,
-            triggerFrame = frame
-        }
-
-        if kind == "dive" then
-            -- A new Dive replaces any override left by an earlier Dive.
-            diveOverride = nil
-            activeDive = {
-                startX = sx,
-                startZ = sz,
-                lastMoveFrame = frame
-            }
-        else
-            -- Surge/Escape do not use the Dive direction lookup.
-            activeDive = nil
-        end
-    end
-
-    -- If a Dive has stopped changing tiles for a few frames, consider its
-    -- movement finished. Do not erase its saved direction.
-    -- This separation lets a subsequent WALK clear the override without
-    -- accidentally treating intermediate Dive tiles as ordinary walking.
-    if activeDive and not moved
-        and frame - activeDive.lastMoveFrame >= SETTLE_TICKS then
-        activeDive = nil
-        pending = nil
-        motion = nil
-    end
-
-    if activeDive then
-        -- The game can report intermediate tiles during Dive. Always compare
-        -- against the ORIGINAL start tile, not the previous frame's tile.
-        if moved then
-            activeDive.lastMoveFrame = frame
-        end
-        local dx = x - activeDive.startX
-        local dz = z - activeDive.startZ
-        local direction = M.directionForOffset(dx, dz)
-        if direction ~= nil then
-            diveOverride = direction
-            effective = direction
-        end
-
-        -- Safety timeout if a Dive remains active unusually long.
-        -- The override remains saved even after tracking is stopped.
-        if frame - pending.triggerFrame >= DIVE_TRACKING_TICKS then
-            activeDive = nil
-            pending = nil
-            motion = nil
-        end
+    if gridDistance(dx, dz) >= LONG_MOVE_DISTANCE and not ability then
+        -- Long move with no signal yet: probably Dive or Surge, whose cooldown
+        -- change arrives next tick. Either way, the dive lookup of the offset
+        -- gives the right facing (a surge goes straight along the facing), so
+        -- show it now; next tick's signal confirms or corrects it.
+        jumpPending = true
+        effective = M.directionForOffset(dx, dz) or effective
     else
-        -- A change in the game's facing means the player actually turned.
-        -- A new tile movement after Dive is also sufficient: the game's
-        -- facing can remain numerically unchanged even when walking resumes.
-        -- A fresh route also counts: the player has asked to move, even if
-        -- they haven't left the tile yet.
-        if diveOverride ~= nil and (facingChanged or moved or routeFacing ~= nil) then
+        local hadJump = jumpPending
+        jumpPending = false
+
+        if hadJump and not ability then
+            -- Last tick's long move wasn't an ability (teleport, shortcut...).
             diveOverride = nil
+        elseif diveOverride ~= nil and not surge
+            and (facingChanged or moved or routeFacing ~= nil) then
+            -- Walking or turning clears the override. Surge doesn't: it keeps
+            -- the player's facing.
+            diveOverride = nil
+        end
+
+        if dive then
+            -- After a frozen long move, the Dive's movement was last tick.
+            if hadJump then
+                diveOverride = M.directionForOffset(lastDX, lastDZ)
+            else
+                diveOverride = M.directionForOffset(dx, dz)
+            end
         end
 
         if diveOverride ~= nil then
-            -- Still standing after Dive: do NOT restore stale game-facing.
+            -- After Dive: do NOT restore stale game-facing.
             effective = diveOverride
         elseif routeFacing ~= nil then
             -- Walking/running: the route leads the character model's turn
@@ -400,30 +329,12 @@ function M.update(player, cooldowns)
             -- Standing still or turning in place.
             effective = currentFacing
         end
-
-        -- Keep the original non-Dive ability bookkeeping. It does not delay
-        -- reading game-facing while the player is running.
-        if motion and frame - motion.lastMoveFrame >= SETTLE_TICKS then
-            if pending then
-                pending = nil
-                motion = nil
-            elseif frame - motion.lastMoveFrame >= COOLDOWN_GRACE_TICKS then
-                motion = nil
-            end
-        end
     end
 
-    -- Cooldown may arrive before movement. Drop a pending non-Dive ability
-    -- after waiting long enough with no tracked movement.
-    if pending and not activeDive and not motion
-        and frame - pending.triggerFrame >= ABILITY_WAIT_TICKS then
-        pending = nil
-    end
-
-    -- Compare game-facing with the previous frame, not with the Dive angle.
     -- A nil reading does not erase the last valid game-facing observation.
     if currentFacing ~= nil then lastGameFacing = currentFacing end
     lastX, lastZ, lastPlane = x, z, plane
+    lastDX, lastDZ = dx, dz
     return effective
 end
 
