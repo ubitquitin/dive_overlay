@@ -40,21 +40,6 @@ local mappingClassificationDirty = true
 local chunks, contextKey
 local mappingScanEvidence = nil
 
--- Find where an 8x8 zone was copied from in an instance.
--- Used by scanSourceMapping() when checking how nearby zones fit together.
--- The game API gives the source zone origin, not the rotation.
--- Returns source zone coordinates, or nil if the lookup fails.
-local function sourceZone(zx,zz,plane)
-    if not CoordGrid or not World or not World.GetRegionSourceForCoordGrid then return nil end
-    local x,z = zx*8,zz*8
-    local okCoord,coord=pcall(CoordGrid.new,plane,math.floor(x/64),math.floor(z/64),x%64,z%64)
-    if not okCoord or not coord then return nil end
-    local ok,src=pcall(World.GetRegionSourceForCoordGrid,coord)
-    if not ok or not src or type(src.x)~="number" or type(src.z)~="number"
-        or type(src.level)~="number" or src.level<0 then return nil end
-    return {x=math.floor(src.x/8),z=math.floor(src.z/8),plane=src.level}
-end
-
 
 -- Check whether nearby 8x8 zones follow the normal map layout.
 -- Called by refreshMappingMode() when an instance needs checking.
@@ -69,7 +54,7 @@ local function scanSourceMapping(zx,zz,plane)
         local k=x..","..z
         local v=sourceCache[k]
         if v==nil then
-            v=sourceZone(x,z,plane) or false
+            v=zoneRotation.sourceForZone(x,z,plane) or false
             sourceCache[k]=v
         end
         return v~=false and v or nil
@@ -82,13 +67,13 @@ local function scanSourceMapping(zx,zz,plane)
                 local east,north=get(x+1,z),get(x,z+1)
                 if east then
                     checked=checked+1
-                    if east.plane~=a.plane or east.x-a.x~=1 or east.z-a.z~=0 then
+                    if east.plane~=a.plane or east.zx-a.zx~=1 or east.zz-a.zz~=0 then
                         return "procedural", "east seam at "..x..","..z
                     end
                 end
                 if north then
                     checked=checked+1
-                    if north.plane~=a.plane or north.x-a.x~=0 or north.z-a.z~=1 then
+                    if north.plane~=a.plane or north.zx-a.zx~=0 or north.zz-a.zz~=1 then
                         return "procedural", "north seam at "..x..","..z
                     end
                 end
@@ -221,19 +206,14 @@ local function chunkFor(x,z,plane,instanced)
     elseif not CoordGrid or not World or not World.GetRegionSourceForCoordGrid then
         entry.error = 'Region source API unavailable'
     else
-        local x0,z0 = entry.destinationOriginX,entry.destinationOriginZ
-        local okCoord, coord = pcall(CoordGrid.new, plane,
-            math.floor(x0/64), math.floor(z0/64), x0%64, z0%64)
-        if not okCoord or not coord then
-            entry.error = 'CoordGrid.new failed: ' .. tostring(coord)
+        local source = zoneRotation.sourceForZone(cx,cz,plane)
+
+        if source then
+            entry.sourceX = source.originX
+            entry.sourceZ = source.originZ
+            entry.sourcePlane = source.plane
         else
-            local ok, src = pcall(World.GetRegionSourceForCoordGrid, coord)
-            if ok and src and type(src.x)=='number' and type(src.z)=='number'
-                and type(src.level)=='number' and src.level>=0 then
-                entry.sourceX,entry.sourceZ,entry.sourcePlane = src.x,src.z,src.level
-            else
-                entry.error = ok and 'Unmapped source area' or tostring(src)
-            end
+            entry.error = 'Source zone lookup failed'
         end
     end
     if entry.sourceX then

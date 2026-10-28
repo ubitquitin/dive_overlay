@@ -72,6 +72,35 @@ The Plugin works by doing the following:
 3. Applies Dynamic collision ADDITION and REMOVAL based on [LocTypes](https://developer.runescape.com/rs/game/config/loctype.html) present.
 4. Runs isDiveable() on the 21x21 region of tiles around the player given the finalized collision grid.
 
+### Procedurally generated areas
+
+Some areas on Runescape like Dungeoneering and ROTS created "random" instances by taking 8x8 zones in a mapchunk and rotating and splicing them together randomly. In most of these instances, the splicing is done in 2x2 blocks of zones. This means that so long as this 2x2 assumption holds true, I can compare the orientation of a zone to its neighbors in order to ascertain the rotation of the 2x2 block of zones. So to properly fetch the collision data for a procedurally generated area, I get the source zone for the current zone and its cardinal neighbors. I look at which zones are adjacent in the source chunk (meaning they are a part of a 2x2 block) and compare how moving in the source is oriented relative to moving in the instance. This gives me the rotation of the 2x2 block, and I can now fetch collision data from the correct region and apply the correct rotation.
+
+Example: Inferring a 90° rotation
+
+       SOURCE MAP                     INSTANCE MAP
+       (original)                     (stitched)
+
+      +-------+-------+              +-------+-------+
+      |       |       |              |       |       |
+      |   B   |   D   |              |   A   |   B   |
+      |       |       |              |       |       |
+      +-------+-------+              +-------+-------+
+      |       |       |              |       |       |
+      |   A   |   C   |              |   C   |   D   |
+      |       |       |              |       |       |
+      +-------+-------+              +-------+-------+
+
+       A -> B : NORTH                  A -> B : EAST
+                (+Z)                            (+X)
+
+       Instance displacement:  (+1, 0)
+       Source displacement:    ( 0,+1)
+
+       EAST in instance -> NORTH in source
+
+       Inferred destination-to-source rotation: 90°
+
 ### The elephant in the room: Dynamic Collision Data
 
 Runescape does not (yet) expose the dynamic collision data through the API. Hopefully, if this is added, the plugin can become more reliable. This means that when obstacles like barriers dissappear, doors open & close, or wildy spiderwebs get cut, the state of collisions and movement change and deviate from the cached data.

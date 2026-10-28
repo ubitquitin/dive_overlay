@@ -11,7 +11,7 @@
 --
 -- sourceForZone() obtains the original source zone using the World API.
 -- detect() infers rotation by comparing the source locations of neighboring
--- destination zones.
+-- destination zones. This assumes that zones are stitched together in 2x2 blocks.
 --
 -- Rotations describe how to transform DESTINATION-local tile offsets into
 -- SOURCE-local tile offsets, not the reverse.
@@ -40,7 +40,7 @@ end
 -- destination zone as the lookup coordinate.
 --
 -- Returns the source zone's X, Z, and plane, or nil if unavailable.
-local function sourceForZone(zx,zz,plane)
+function M.sourceForZone(zx,zz,plane)
 
     -- Reuse a previously resolved source mapping.
     local k=key(zx,zz,plane)
@@ -87,7 +87,10 @@ local function sourceForZone(zx,zz,plane)
     local result={
         zx=math.floor(src.x/8),
         zz=math.floor(src.z/8),
-        plane=src.level
+        plane=src.level,
+        -- Preserve exact source tile coordinates for collision mapping.
+        originX=src.x,
+        originZ=src.z
     }
 
     -- Cache successful lookups to avoid repeating the World API call.
@@ -161,7 +164,7 @@ function M.detect(x,z,plane)
     end
 
     -- Find the original source zone corresponding to this destination zone.
-    local center=sourceForZone(zx,zz,plane)
+    local center=M.sourceForZone(zx,zz,plane)
     if not center then return nil,0 end
 
     -- votes[rotation] counts how many neighbors support that rotation.
@@ -174,7 +177,7 @@ function M.detect(x,z,plane)
         local dx,dz=n[1],n[2]
 
         -- Find where this neighboring destination zone originated.
-        local adjacent=sourceForZone(zx+dx,zz+dz,plane)
+        local adjacent=M.sourceForZone(zx+dx,zz+dz,plane)
 
         -- Only compare zones originating from the same source plane.
         if adjacent and adjacent.plane==center.plane then
