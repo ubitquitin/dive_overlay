@@ -37,10 +37,15 @@ function M.addedCollisionMask(loc)
     elseif shape == 2 then
         if loc.rotation == nil then return 0 end
         return WALL_BY_ROTATION[loc.rotation % 4] or 0
+    -- For ground decoration, enforce that blockWalk = 1
+    elseif (shape == 22 and loc.block == 1) then
+        return CENTER
+
     -- Otherwise return central blocking for the respective remaining shapes
     elseif shape == 9 or shape == 10 or shape == 11 then
         return CENTER
     end
+
     return 0
 end
 
@@ -49,7 +54,10 @@ end
 -- Updates the static collision mask with our computed dynamic mask
 function M.addVisibleWallEdges(locs, effectiveByTile)
     for _,loc in ipairs(locs) do
+        -- apply the shape based collision mask update
         local mask = M.addedCollisionMask(loc)
+        -- update the final collision mapping if the collision is nonzero
+        -- effectiveByTile updates the object passed in from the collisionManager.
         if (mask & CARDINAL) ~= 0 then
             local k = key(loc.x, loc.z, loc.plane)
             if effectiveByTile[k] ~= nil then
@@ -59,13 +67,18 @@ function M.addVisibleWallEdges(locs, effectiveByTile)
     end
 end
 
+
 -- Edge case collision addition. Objects with blockwalk=0 but that do block.
 -- Mark the occupied footprint of a visible, explicitly server-blocking Loc.
 -- Entity width/length are already world-oriented, as in the Loc inspector.
 function M.applyServerBlockingLocs(locs, effectiveByTile)
     for _,loc in ipairs(locs) do
+        -- If the loc id is in our list of exceptions, set rule to true
         local rule = specialCases.serverBlockingLocs[loc.id]
-        if rule and loc.hidden == false then
+        -- If there is an exception loc (regardless of if it's hidden)
+        -- add center blocking to all tiles it occupies.
+        --if rule and loc.hidden == false then
+        if rule then
             local width = math.max(1, math.floor(loc.width or 1))
             local length = math.max(1, math.floor(loc.length or 1))
             if not rule.footprint then width, length = 1, 1 end
