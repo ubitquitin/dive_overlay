@@ -67,8 +67,8 @@ function M.saveSettings()
 end
 
 
--- Converts a user-selected RGBA colour into the eight vertex colours
--- required by drawTile().
+-- Helper function that takes the hex input from color pickers and 
+-- converts it into RGBA values, which are passed directly to drawTile.
 --
 -- The first four vertices form the tile outline and retain the selected
 -- colour and opacity. The last four form the tile fill, whose opacity
@@ -89,7 +89,8 @@ M.surgeRGBA = colours(M.settings.surgeColour)
 M.escapeRGBA = colours(M.settings.escapeColour)
 
 
--- -- Updates a tile colour and its corresponding drawing vertex colours.
+-- Updates a tile colour and its corresponding drawing vertex colours.
+-- Saves the color choice into the settings persistentDB
 function M.setColour(kind, value)
     local settingKey = kind .. "Colour"
     local rgbaKey = kind .. "RGBA"
@@ -104,16 +105,20 @@ function M.setColour(kind, value)
 end
 
 
+-- Function that is called when the user clicks the open settings button in the plugin settings UI
+-- constructs a pretty UI window with toggles for dive overlays, modes and tile color pickers
 function M.openSettings()
-    -- Put your original PrettyUI window creation code here.
+    -- initialize the prettyUI window
     local uiWindow
 
+    -- creates the prettyUI window
     local parent = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA)
     uiWindow = prettyui.Window.new(parent, {
         title = "Dive / Surge / Escape", x = 800, y = 200,
         width = 330, height = uiMinimized and 140 or 415, resizable = true,
         minWidth = 280, minHeight = 140, scrollable = true,
     })
+    -- Adds the section for Dive Tile Mode
     uiWindow:AddTitle("Dive tiles")
     uiWindow:AddRadioButton({
         {text = "All diveable tiles", value = "all"},
@@ -123,6 +128,7 @@ function M.openSettings()
         selectedValue = M.settings.diveMode,
         onChange = function(_, value) M.settings.diveMode = value M.saveSettings() end,
     })
+    -- Adds the section for Overlay tile options
     uiWindow:AddTitle("Overlays")
     uiWindow:AddCheckboxButton({
         {text = "Surge tiles", value = "surge", selected = M.settings.showSurge},
@@ -137,6 +143,7 @@ function M.openSettings()
             elseif changed == "behind" then M.settings.hideBehind = selected M.saveSettings() end
         end,
     })
+    -- Adds the section for tile color pickers
     uiWindow:AddTitle("Tile colours")
     uiWindow:AddText("Dive")
     uiWindow:AddColourPicker({
@@ -164,6 +171,8 @@ function M.openSettings()
     })
 end
 
+-- Builds the UI in the actual Jagex Plugin Settings UI.
+-- Right now this is just a button that opens up the PrettyUI window when clicked
 function M.buildSettings(parent)
     local button = ui.Button.new(parent)
     button.stylesheetID = id.StyleSheet.BUTTON_DEFAULT
