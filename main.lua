@@ -29,8 +29,10 @@ local function vp(id)
     return nil
 end
 
--- Calls CreateUI() to create the prettyUI Window
-uiUtils.start()
+-- Populate the native Plugin Hub settings layer when opened.
+Event.SettingsLayerReady.Subscribe("diveOverlaySettings", function(event)
+    uiUtils.buildSettings(event.component)
+end)
 
 
 -- MiniMenu entries are ordered from lowest to highest priority.
@@ -219,7 +221,9 @@ end
 
 -- Shutdown function
 function PluginShutdown()
-    uiUtils.shutdown()
+    uiUtils.saveSettings()
+    
+    Event.SettingsLayerReady.Unsubscribe("diveOverlaySettings")
     Event.Draw.Unsubscribe('bladedDiveTiles')
     Event.MiniMenuReady.Unsubscribe("diveCursorCheck")
     Event.ServerLogic.Unsubscribe("updateCollision")
