@@ -7,8 +7,6 @@
 -- main.lua calls updateRegionState() before rebuildCollisionOverrides().
 -- Dive movement code reads the result through getFlags().
 
-
-
 -- ============================================================================
 -- 1. MODULE DEPENDENCIES AND SHARED STATE
 -- ============================================================================
@@ -20,7 +18,9 @@ local addCollisions = require("src/collision_manager/add_collisions")
 local rmCollisions = require("src/collision_manager/rm_collisions")
 
 local DEFAULT_RADIUS = 32 -- Radius used when rebuilding nearby collision flags
-local locOverrides = {}
+-- The final store object for dynamic collision data
+-- This object is accessed by the dive utilities to lookup if a tile nearby is diveable
+local effectiveCollisionFlags = {}
 
 -- ============================================================================
 -- 2. PROCEDURAL INSTANCE CLASSIFICATION
@@ -36,7 +36,6 @@ local isProceduralMapping = false
 local mappingClassificationDirty = true
 -- Cache source-zone coordinates and rotations for destination 8x8 zones.
 local cached_zones = {}
-
 
 -- Check whether nearby 8x8 zones follow the normal map layout.
 -- Called by refreshMappingMode() when an instance needs checking.
@@ -58,7 +57,7 @@ local function detectWhetherProcedural(zone_ind_x,zone_ind_z,plane)
                     -- Check whether moving east in the instance
                     -- also moves east in the source map.
                     -- If not, return procedural
-                    if east.plane ~= testZone.plane
+                    if east.source_region_plane ~= testZone.source_region_plane
                         or east.source_region_index_x - testZone.source_region_index_x ~= 1
                         or east.source_region_index_z - testZone.source_region_index_z ~= 0 then
                         return true
@@ -68,7 +67,7 @@ local function detectWhetherProcedural(zone_ind_x,zone_ind_z,plane)
                     -- Check whether moving north in the instance
                     -- also moves north in the source map.
                     -- If not, return procedural
-                    if north.plane ~= testZone.plane
+                    if north.source_region_plane ~= testZone.source_region_plane
                         or north.source_region_index_x - testZone.source_region_index_x ~= 0
                         or north.source_region_index_z - testZone.source_region_index_z ~= 1 then
                         return true
@@ -134,7 +133,7 @@ local function key(a,b,c)
 end
 
 -- Ask the game whether the player is inside an instance.
--- Used by updateRegionState(), resolve(), and region event handlers.
+-- Used by updateRegionState(), getSourceTile(), and region event handlers.
 -- Returns false if the game API is missing or fails.
 local function isInsideInstance()
     if not World or not World.IsRegion then return false end
@@ -149,7 +148,7 @@ local function clearMappings(resetInstance)
     zoneRotation.clear()
     cached_zones = {}
     mappingClassificationDirty = true
-    locOverrides = {}
+    effectiveCollisionFlags = {}
 
     if resetInstance then
         isProceduralMapping = false
@@ -157,7 +156,7 @@ local function clearMappings(resetInstance)
 end
 
 -- Find and remember the source of the 8x8 zone containing a tile.
--- Called by resolve() for individual tile lookups.
+-- Called by getSourceTile() for individual tile lookups.
 -- Outside instances, the source and destination are the same.
 -- Inside instances, ask the game for the source zone.
 -- For procedural areas, also ask resolve_procedural_zones for rotation.
@@ -165,8 +164,13 @@ end
 local function fetchZone(worldtile_x,worldtile_z,plane,instanced)
     local zone_ind_x,zone_ind_z = math.floor(worldtile_x/8), math.floor(worldtile_z/8)
     local k = key(zone_ind_x,zone_ind_z,plane)
+    
     local cached = cached_zones[k]
-    if cached then return cached end
+    -- If zone info is cached return it.
+    -- But retry unresolved mappings and rotations.
+    if cached and cached.sourceX ~= nil and cached.rotation ~= nil then
+        return cached
+    end
 
     -- Store the destination zone origin once; all tile offsets within this
     -- zone are relative to this origin when resolving source coordinates.
@@ -174,17 +178,23 @@ local function fetchZone(worldtile_x,worldtile_z,plane,instanced)
         destinationChunkX=zone_ind_x, destinationChunkZ=zone_ind_z, plane=plane,
         destinationOriginX=zone_ind_x*8, destinationOriginZ=zone_ind_z*8
     }
+
     -- Noninstanced case, source and destination are the same
     if not instanced then
-        entry.sourceX,entry.sourceZ,entry.sourcePlane = entry.destinationOriginX,entry.destinationOriginZ,plane
+        entry.sourceX = entry.destinationOriginX
+        entry.sourceZ = entry.destinationOriginZ
+        entry.sourcePlane = plane
     -- instanced case, get the source region coords
     else
-        local source = zoneRotation.sourceForZone(zone_ind_x,zone_ind_z,plane)
+        -- Instance: resolve the original source zone.
+        local source = zoneRotation.sourceForZone(
+            zone_ind_x, zone_ind_z, plane
+        )
 
         if source then
             entry.sourceX = source.source_region_origin_worldtile_x
             entry.sourceZ = source.source_region_origin_worldtile_z
-            entry.sourcePlane = source.plane
+            entry.sourcePlane = source.source_region_plane
         end
     end
     
@@ -219,12 +229,39 @@ function M.invalidateRegionUpdate()
     clearMappings(false)
 end
 
+-- Called before rebuildCollisionOverrides() each overlay update.
+-- Handle transitions into/out of instances and classify newly invalidated
+-- instance layouts. Individual source zones and static maps load on demand
+-- when getStaticCollisionFlags() reads a tile.
+function M.updateRegionState(x, z, plane)
+    if type(x) ~= "number" or type(z) ~= "number" or type(plane) ~= "number" then
+        return
+    end
+
+    x, z, plane = math.floor(x), math.floor(z), math.floor(plane)
+    local instanced = isInsideInstance()
+
+    -- If we've entered or exited an instance,
+    -- invalidate cached zone mappings and procedural state.
+    -- 
+    -- RegionCreated/RegionUpdated events handle changes within an instance.
+    if previousRegion ~= nil and previousRegion ~= instanced then
+        clearMappings(true)
+    end
+    previousRegion = instanced
+
+    -- Only scans neighboring source zones when mappingClassificationDirty
+    -- was set by a region event or a mapping reset.
+    refreshMappingMode(x, z, plane, instanced)
+end
+
+
 
 -- ============================================================================
 -- 4. ZONE ROTATION AND DIRECTIONAL COLLISION FLAGS
 -- ============================================================================
 -- Convert a tile position within a rotated instanced 8x8 zone to its source position.
--- Used by resolve() after fetchZone() finds the source zone and rotation.
+-- Used by getSourceTile() after fetchZone() finds the source zone and rotation.
 -- Offsets run from 0 to 7 on each axis.
 local function rotatedOffset(ox,oz,r)
     if r==90 then return 7-oz,ox end
@@ -275,16 +312,23 @@ end
 -- Uses fetchZone() to find the source 8x8 zone and rotatedOffset()
 -- to find the right tile within that zone.
 -- Returns source x, z, plane, instance status, and rotation; nil on failure.
-function M.resolve(x,z,plane)
+function M.getSourceTile(x,z,plane)
     if type(x)~='number' or type(z)~='number' or type(plane)~='number' then return nil end
+    
     x,z,plane = math.floor(x),math.floor(z),math.floor(plane)
+
     local instanced = isInsideInstance()
-    local c = fetchZone(x,z,plane,instanced)
-    if not c.sourceX or c.rotation==nil then return nil end
+    local zone = fetchZone(x,z,plane,instanced)
+
+    if not zone.sourceX or zone.rotation==nil then return nil end
+
     -- Convert the destination tile into a 0..7 offset inside its zone.
-    local ox,oz=x-c.destinationOriginX,z-c.destinationOriginZ
-    local rx,rz=rotatedOffset(ox,oz,c.rotation)
-    return c.sourceX+rx,c.sourceZ+rz,c.sourcePlane,instanced,c.rotation
+    local ox,oz=x-zone.destinationOriginX,z-zone.destinationOriginZ
+
+    -- Get the tile position based on the zone's rotation
+    local rx,rz=rotatedOffset(ox,oz,zone.rotation)
+
+    return zone.sourceX+rx,zone.sourceZ+rz,zone.sourcePlane,instanced,zone.rotation
 end
 
 -- Locs are evaluated in destination-world space. Cache raw map tiles unchanged.
@@ -304,9 +348,11 @@ end
 -- Read and normalize a Loc into a collision record.
 -- Returns nil when required properties are unavailable.
 local function readLoc(loc)
+    -- get the location's coord grid
     local grid = readProperty(loc, "coordGrid")
+    -- get the locations' config
     local cfg = readProperty(loc, "config")
-
+    -- get the locations' coordinates
     local x = readProperty(grid, "x")
     local z = readProperty(grid, "z")
     local plane = readProperty(grid, "level")
@@ -316,25 +362,30 @@ local function readLoc(loc)
         or type(plane) ~= "number" then
         return nil
     end
-
+    -- get the locations' blockWalk value
     local rawBlock = readProperty(cfg, "blockWalk")
     local block = tonumber(rawBlock)
 
+    -- blockWalk is 0-2, 0 means no block for our heuristic
     if rawBlock == true then
         block = 1
     elseif rawBlock == false then
         block = 0
     end
 
+    -- get the locations' isHidden property. 
+    -- Locations that are hidden often invert their blockWalk
     local hidden = readProperty(loc, "isHidden")
 
     if block == nil or type(hidden) ~= "boolean" then
         return nil
     end
 
+    -- get the locations' displayName
     local name = readProperty(loc, "displayName")
     if type(name) ~= "string" then name = "" end
 
+    -- return a comprehansive table of Location properties
     return {
         x = math.floor(x),
         z = math.floor(z),
@@ -361,9 +412,12 @@ end
 -- collision flags. Rotate wall directions to match the visible instance.
 -- Dynamic Loc overrides are applied separately.
 local function getStaticCollisionFlags(x, z, plane)
-    local sx, sz, sp, _, rotation = M.resolve(x, z, plane)
+    -- Get the source map tile from the destination tile
+    -- This accounts for potential zone rotation in procedural areas
+    local sx, sz, sp, _, rotation = M.getSourceTile(x, z, plane)
     if not sx then return nil end
 
+    -- Get the static collision flags from the mapdata cache.
     local ok, flags = pcall(mapdata.getTile, sx, sz, sp)
     if not ok or type(flags) ~= "number" then
         return nil
@@ -371,8 +425,10 @@ local function getStaticCollisionFlags(x, z, plane)
 
     if flags < 0 then return nil end
 
+    -- return the flags, rotated if in a procedural rotated zone
     return rotateCollisionFlags(flags, rotation)
 end
+
 
 -- ============================================================================
 -- 7. DYNAMIC COLLISION OVERRIDE RECONSTRUCTION
@@ -383,74 +439,122 @@ end
 -- 2. Group Locs by origin tile and by every tile their size covers.
 -- 3. Read each tile's static flags and remove stale blocking.
 -- 4. Add walls and blocking objects that are currently visible.
--- 5. Save the final flags in locOverrides for getFlags().
+-- 5. Save the final flags in effectiveCollisionFlags for getFlags().
 -- Rebuilds on each call so doors and other changing objects are reflected.
 function M.rebuildCollisionOverrides(playerGrid, radius)
-    locOverrides = {}
+    -- Discard the previous collision results so changes to nearby Locs
+    -- (such as doors opening or closing) are reflected in this rebuild.
+    effectiveCollisionFlags = {}
+    -- if there are no nearby locations, and the player is does not have a coordGrid, exit.
     if not playerGrid or not LocList or not LocList.ByDistance then
         return
     end
+    
+    -- search radius for locs
     radius = math.max(1, math.floor(radius or DEFAULT_RADIUS))
+
+    -- fetch nearby Locs
     local ok, nearby = pcall(LocList.ByDistance, playerGrid, radius+2, true)
     if not ok then
         return
     end
+    -- make sure LocList.ByDistance returns a Lua Table
     if type(nearby) ~= 'table' then
         return
     end
 
-    -- Keep one flat list for cross-tile rules and an origin-indexed list
-    -- for matching directional objects such as doors at their own tiles.
+    -- Organize nearby Locs in two ways:
+    -- locs:   flat list of all valid nearby Locs, used for cross-tile rules.
+    -- byTile: Locs grouped by their ORIGIN tile, used for rules that
+    --         depend on an object's exact placement (e.g. directional doors).
     local locs, byTile = {}, {}
 
     for _, loc in pairs(nearby) do
+        -- Extract relevant properties into a normalized Lua record.
+        -- Invalid/incomplete Locs are skipped.
         local record = readLoc(loc)
 
         if record then
+            -- Add to the complete list of nearby Locs.
             locs[#locs + 1] = record
 
+            -- Also index this Loc by its origin coordinates.
+            -- Multiple Locs can share the same origin tile.
             local k = key(record.x, record.z, record.plane)
             byTile[k] = byTile[k] or {}
+            -- byTile stores tiles as keys, and a list of records as values
             byTile[k][#byTile[k] + 1] = record
         end
     end
 
-    -- CENTER checks use the full world-aligned Loc footprints, not only origins.
-    -- Keep byTile unchanged for directional-door matching.
-    -- Expand multi-tile Loc footprints for CENTER occupancy checks;
-    -- directional matching still uses the original byTile index.
+    -- Build a second tile index for CENTER (full-tile blocking) checks.
+    --
+    -- Unlike byTile, which only indexes a Loc's origin, this table
+    -- indexes EVERY tile occupied by a Loc's footprint.
+    --
+    -- Example: a 2x2 object starting at (100, 200) appears under:
+    -- (100,200), (101,200), (100,201), and (101,201).
+    --
+    -- Directional collision rules still use byTile because walls and
+    -- doors are associated with their original placement coordinates.
     local centerLocsByTile = {}
     for _,loc in ipairs(locs) do
+        -- Determine the size of the Loc's occupied area in tiles.
+        -- Dimensions are already world-aligned, so do not swap
+        -- width/length based on rotationType.
         local width = math.max(1, math.floor(loc.width or 1))
         local length = math.max(1, math.floor(loc.length or 1))
-        -- Loc entity dimensions already describe its world-aligned footprint.
-        -- Do not swap them again for rotationType (the inspector doesn't).
+        -- Expand the Loc's footprint into individual occupied tiles.
         for dx=0,width-1 do
             for dz=0,length-1 do
                 local k=key(loc.x+dx,loc.z+dz,loc.plane)
+                -- Create the tile's occupant list if it doesn't exist.
                 local occupants=centerLocsByTile[k]
                 if not occupants then
                     occupants={}
                     centerLocsByTile[k]=occupants
                 end
+                -- Add this Loc to every tile covered by its footprint.
                 occupants[#occupants+1]=loc
             end
         end
     end
 
-    -- Resolve all tiles within the requested area; floor masks are not used
-    -- to determine walkability.
-    local px,pz,plane = readProperty(playerGrid,'x'),readProperty(playerGrid,'z'),readProperty(playerGrid,'level')
-    if type(px) ~= 'number' or type(pz) ~= 'number' or type(plane) ~= 'number' then return end
+    -- Read the player's current world tile and plane.
+    -- These coordinates define the center of the collision search area.
+    local px, pz, plane =
+        readProperty(playerGrid, 'x'),
+        readProperty(playerGrid, 'z'),
+        readProperty(playerGrid, 'level')
+
+    if type(px) ~= 'number'
+        or type(pz) ~= 'number'
+        or type(plane) ~= 'number' then
+        return
+    end
+
     px,pz,plane = math.floor(px),math.floor(pz),math.floor(plane)
-    -- Start with rotated static flags and apply removal rules per tile.
-    -- Additions are applied in a separate pass after this grid is built.
+
+    -- Build the effective collision grid in two stages:
+    --
+    -- Stage 1: Start with static map flags and REMOVE blocking that
+    --          should no longer exist based on the current Loc states.
+    --
+    -- Stage 2: ADD blocking from currently visible/active Locs.
+    --
+    -- This ordering is important: we first clear outdated collision
+    -- before reconstructing the current blocking state.
     local effectiveByTile = {}
+    -- Process every tile in the square centered on the player.
     for x=px-radius,px+radius do
         for z=pz-radius,pz+radius do
+            -- Get the static (and potentially rotated) collision flags
             local flags = getStaticCollisionFlags(x,z,plane)
             if type(flags)=='number' and flags>=0 then
                 local tileKey = key(x,z,plane)
+                -- Apply collision-removal rules:
+                -- Remove center blocking collision if (hidden & (active | blockWalk)) [things like barriers dissappearing]
+                -- Remove stale directional blocking collision flags [things like doors opening]
                 effectiveByTile[tileKey] = rmCollisions.effectiveFlags(
                     flags,
                     centerLocsByTile[tileKey] or {},
@@ -463,10 +567,18 @@ function M.rebuildCollisionOverrides(playerGrid, radius)
 
     -- Add visible shape-based directional walls after static clearance.
     addCollisions.addVisibleWallEdges(locs, effectiveByTile)
+    -- Add center collision to edge case locs in special_cases.lua
     addCollisions.applyServerBlockingLocs(locs, effectiveByTile)
 
+    -- Publish the completed collision grid for getFlags().
+    --
+    -- Each entry contains the FINAL effective flags for that tile,
+    -- not just the changes relative to the static collision map.
+    --
+    -- getFlags() reads these values first and falls back to static
+    -- collision flags for tiles outside this rebuilt area.
     for k,effective in pairs(effectiveByTile) do
-        locOverrides[k] = effective
+        effectiveCollisionFlags[k] = effective
     end
 end
 
@@ -478,40 +590,17 @@ end
 -- Called by dive_utils.lua through the collision lookup passed from main.lua.
 -- Return live-adjusted flags when available, otherwise static flags.
 function M.getFlags(x, z, plane)
+    -- construct a key for the collision data store with coordinates
     local k = key(math.floor(x), math.floor(z), math.floor(plane))
 
-    if locOverrides[k] ~= nil then
-        return locOverrides[k]
+    -- get the stored dynamic collision flag for the tile.
+    if effectiveCollisionFlags[k] ~= nil then
+        return effectiveCollisionFlags[k]
     end
 
+    -- fallback if the store doesnt have the key, return static collision flag
     return getStaticCollisionFlags(x, z, plane)
 end
 
--- ============================================================================
--- 9. REGION STATE UPDATE
--- ============================================================================
--- Called before rebuildCollisionOverrides() each overlay update.
--- Handle transitions into/out of instances and classify newly invalidated
--- instance layouts. Individual source zones and static maps load on demand
--- when getStaticCollisionFlags() reads a tile.
-function M.updateRegionState(x, z, plane)
-    if type(x) ~= "number" or type(z) ~= "number" or type(plane) ~= "number" then
-        return
-    end
-
-    x, z, plane = math.floor(x), math.floor(z), math.floor(plane)
-    local instanced = isInsideInstance()
-
-    -- An instance-status change invalidates mappings from the previous area.
-    -- RegionCreated/RegionUpdated events handle changes within an instance.
-    if previousRegion ~= nil and previousRegion ~= instanced then
-        clearMappings(true)
-    end
-    previousRegion = instanced
-
-    -- Only scans neighboring source zones when mappingClassificationDirty
-    -- was set by a region event or a mapping reset.
-    refreshMappingMode(x, z, plane, instanced)
-end
 
 return M

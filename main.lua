@@ -66,10 +66,13 @@ local function doTick()
     -- which feels more accurate to what your dive is going to base on
     local coordGrid = self.routeEnd or self.coordGrid
 
-    -- Fetch the static collision data
-    collisionManager.update(coordGrid.x, coordGrid.z, coordGrid.level)
-    -- Update static collision data with dynamic collision data heuristics from locEntities
-    collisionManager.updateLocs(coordGrid, RADIUS + 2)
+    -- First, detect region changes and prepare procedural mapping state.
+    collisionManager.updateRegionState(
+        coordGrid.x, coordGrid.z, coordGrid.level
+    )
+
+    -- Then, reconstruct effective collision flags from nearby game objects.
+    collisionManager.rebuildCollisionOverrides(coordGrid, RADIUS)
 
     local tiles = {}
     for ox = -RADIUS, RADIUS do
@@ -219,6 +222,7 @@ function PluginShutdown()
     uiUtils.shutdown()
     Event.Draw.Unsubscribe('bladedDiveTiles')
     Event.MiniMenuReady.Unsubscribe("diveCursorCheck")
+    Event.ServerLogic.Unsubscribe("updateCollision")
     if regionCreatedSubscribed and Event.RegionCreated.Unsubscribe then
         Event.RegionCreated.Unsubscribe('diveCollisionRegionCreated')
     end

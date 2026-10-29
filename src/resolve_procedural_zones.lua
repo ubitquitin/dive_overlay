@@ -166,7 +166,7 @@ function M.detect(instance_worldtile_x,instance_worldtile_z,plane)
         local adjacent=M.sourceForZone(instance_zone_index_x+dx,instance_zone_index_z+dz,plane)
 
         -- Only compare zones originating from the same source plane.
-        if adjacent and adjacent.plane==center.plane then
+        if adjacent and adjacent.source_region_plane==center.source_region_plane then
 
             -- Calculate the displacement between their SOURCE zones.
             local region_dist_x,region_dist_z=adjacent.source_region_index_x-center.source_region_index_x,adjacent.source_region_index_z-center.source_region_index_z
@@ -224,7 +224,7 @@ function M.detect(instance_worldtile_x,instance_worldtile_z,plane)
             destinationZ=instance_zone_index_z,
             sourceX=center.source_region_index_x,
             sourceZ=center.source_region_index_z,
-            sourcePlane=center.plane,
+            sourcePlane=center.source_region_plane,
 
             -- Number of neighboring observations supporting the winner.
             evidence=bestCount,
