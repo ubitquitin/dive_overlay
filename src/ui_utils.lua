@@ -137,10 +137,19 @@ function M.openSettings()
         {text = "Hide dive tiles behind", value = "behind", selected = M.settings.hideBehind},
     }, {
         onChange = function(_, _, changed, selected)
-            if changed == "surge" then M.settings.showSurge = selected
-            elseif changed == "escape" then M.settings.showEscape = selected
-            elseif changed == "arrows" then M.settings.showArrows = selected
-            elseif changed == "behind" then M.settings.hideBehind = selected M.saveSettings() end
+            if changed == "surge" then
+                M.settings.showSurge = selected
+            elseif changed == "escape" then
+                M.settings.showEscape = selected
+            elseif changed == "arrows" then
+                M.settings.showArrows = selected
+            elseif changed == "behind" then
+                M.settings.hideBehind = selected
+            else
+                return
+            end
+
+            M.saveSettings()
         end,
     })
     -- Adds the section for tile color pickers
