@@ -6,8 +6,10 @@ local RADIUS = 10
 local GROUND_OFFSET = 30
 
 -- UI state; original default colours retained.
-M.settings = {
-    diveMode = "all", -- "all", "perimeter", or "hover"
+local SETTINGS_KEY = "diveOverlaySettings"
+
+local DEFAULT_SETTINGS = {
+    diveMode = "all",
     showSurge = true,
     showEscape = true,
     showArrows = false,
@@ -17,9 +19,56 @@ M.settings = {
     escapeColour = 0x008000FF,
 }
 
+local function loadSettings()
+    local saved = PersistentDB:GetStructuredData(SETTINGS_KEY)
+    local settings = {}
 
--- Converts a user-selected RGBA colour into the eight vertex colours
--- required by drawTile().
+    for key, default in pairs(DEFAULT_SETTINGS) do
+        local value = type(saved) == "table" and saved[key] or nil
+
+        if key:match("Colour$") then
+            if type(value) == "string"
+                and value:match("^%x%x%x%x%x%x%x%x$") then
+                value = tonumber(value, 16)
+            else
+                value = default
+            end
+        elseif type(value) ~= type(default) then
+            value = default
+        end
+
+        settings[key] = value
+    end
+
+    -- Validate the selected mode.
+    if settings.diveMode ~= "all"
+        and settings.diveMode ~= "perimeter"
+        and settings.diveMode ~= "hover" then
+        settings.diveMode = "all"
+    end
+
+    return settings
+end
+
+M.settings = loadSettings()
+
+function M.saveSettings()
+    local saved = {}
+
+    for key, value in pairs(M.settings) do
+        if key:match("Colour$") then
+            saved[key] = string.format("%08X", value)
+        else
+            saved[key] = value
+        end
+    end
+
+    PersistentDB:SetStructuredData(SETTINGS_KEY, saved)
+end
+
+
+-- Helper function that takes the hex input from color pickers and 
+-- converts it into RGBA values, which are passed directly to drawTile.
 --
 -- The first four vertices form the tile outline and retain the selected
 -- colour and opacity. The last four form the tile fill, whose opacity
@@ -34,34 +83,42 @@ local function colours(colour)
     return {rgb | alpha,rgb | alpha,rgb | alpha,rgb | alpha,
             rgb | fillAlpha,rgb | fillAlpha,rgb | fillAlpha,rgb | fillAlpha}
 end
+
 M.diveRGBA = colours(M.settings.diveColour)
 M.surgeRGBA = colours(M.settings.surgeColour)
 M.escapeRGBA = colours(M.settings.escapeColour)
 
 
-local uiWindow
-local uiMinimized = false
+-- Updates a tile colour and its corresponding drawing vertex colours.
+-- Saves the color choice into the settings persistentDB
+function M.setColour(kind, value)
+    local settingKey = kind .. "Colour"
+    local rgbaKey = kind .. "RGBA"
 
--- Creates the PrettyUI settings window for the Dive overlay.
---
--- Allows the user to choose which tiles and overlays to display, whether
--- to hide tiles behind the player, and the colours of each overlay.
--- Changes are written directly to M.settings, which main.lua reads
--- when deciding what to render.
-local createUI
-createUI = function()
+    if M.settings[settingKey] == nil then return end
+    if type(value) ~= "number" then return end
+
+    M.settings[settingKey] = value
+    M[rgbaKey] = colours(value)
+
+    M.saveSettings()
+end
+
+
+-- Function that is called when the user clicks the open settings button in the plugin settings UI
+-- constructs a pretty UI window with toggles for dive overlays, modes and tile color pickers
+function M.openSettings()
+    -- initialize the prettyUI window
+    local uiWindow
+
+    -- creates the prettyUI window
     local parent = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA)
     uiWindow = prettyui.Window.new(parent, {
-        title = "Dive / Surge / Escape", x = 130, y = 200,
+        title = "Dive / Surge / Escape", x = 800, y = 200,
         width = 330, height = uiMinimized and 140 or 415, resizable = true,
         minWidth = 280, minHeight = 140, scrollable = true,
     })
-    uiWindow:AddSimpleButton(uiMinimized and "Expand settings" or "Minimize settings", function()
-        uiMinimized = not uiMinimized
-        if uiWindow then uiWindow:Destroy(); uiWindow = nil end
-        createUI()
-    end)
-    if uiMinimized then return end
+    -- Adds the section for Dive Tile Mode
     uiWindow:AddTitle("Dive tiles")
     uiWindow:AddRadioButton({
         {text = "All diveable tiles", value = "all"},
@@ -69,8 +126,9 @@ createUI = function()
         {text = "Hover mode", value = "hover"},
     }, {
         selectedValue = M.settings.diveMode,
-        onChange = function(_, value) M.settings.diveMode = value end,
+        onChange = function(_, value) M.settings.diveMode = value M.saveSettings() end,
     })
+    -- Adds the section for Overlay tile options
     uiWindow:AddTitle("Overlays")
     uiWindow:AddCheckboxButton({
         {text = "Surge tiles", value = "surge", selected = M.settings.showSurge},
@@ -79,20 +137,29 @@ createUI = function()
         {text = "Hide dive tiles behind", value = "behind", selected = M.settings.hideBehind},
     }, {
         onChange = function(_, _, changed, selected)
-            if changed == "surge" then M.settings.showSurge = selected
-            elseif changed == "escape" then M.settings.showEscape = selected
-            elseif changed == "arrows" then M.settings.showArrows = selected
-            elseif changed == "behind" then M.settings.hideBehind = selected end
+            if changed == "surge" then
+                M.settings.showSurge = selected
+            elseif changed == "escape" then
+                M.settings.showEscape = selected
+            elseif changed == "arrows" then
+                M.settings.showArrows = selected
+            elseif changed == "behind" then
+                M.settings.hideBehind = selected
+            else
+                return
+            end
+
+            M.saveSettings()
         end,
     })
+    -- Adds the section for tile color pickers
     uiWindow:AddTitle("Tile colours")
     uiWindow:AddText("Dive")
     uiWindow:AddColourPicker({
         value = M.settings.diveColour, alphaSlider = true,
         windowTitle = "Dive tile colour",
         onChange = function(_, value)
-            M.settings.diveColour = value
-            M.diveRGBA = colours(value)
+            M.setColour("dive", value)
         end,
     })
     uiWindow:AddText("Surge")
@@ -100,8 +167,7 @@ createUI = function()
         value = M.settings.surgeColour, alphaSlider = true,
         windowTitle = "Surge tile colour",
         onChange = function(_, value)
-            M.settings.surgeColour = value
-            M.surgeRGBA = colours(value)
+            M.setColour("surge", value)
         end,
     })
     uiWindow:AddText("Escape")
@@ -109,26 +175,25 @@ createUI = function()
         value = M.settings.escapeColour, alphaSlider = true,
         windowTitle = "Escape tile colour",
         onChange = function(_, value)
-            M.settings.escapeColour = value
-            M.escapeRGBA = colours(value)
+            M.setColour("escape", value)
         end,
     })
 end
 
--- Initializes the overlay's settings window when the plugin starts.
--- Uses pcall so a UI initialization error is reported without
--- crashing the rest of the plugin.
-function M.start()
-    local ok, err = pcall(createUI)
-    if not ok then print("Dive UI setup error: " .. tostring(err)) end
+-- Builds the UI in the actual Jagex Plugin Settings UI.
+-- Right now this is just a button that opens up the PrettyUI window when clicked
+function M.buildSettings(parent)
+    local button = ui.Button.new(parent)
+    button.stylesheetID = id.StyleSheet.BUTTON_DEFAULT
+    button.label = "Open Settings"
+    button:SetPos(12, 20)
+    button:SetSize(200, 36)
+
+    button:Subscribe(ui.Hook.ONBUTTONPRESSED, function()
+        M.openSettings()
+    end)
 end
 
-
--- Destroys the settings window when the plugin shuts down,
--- preventing the UI from remaining visible after the plugin stops.
-function M.shutdown()
-    if uiWindow then uiWindow:Destroy(); uiWindow = nil end
-end
 
 -- Vertex indices used by ShapeList.Draw when rendering a tile.
 -- 'lines' connects the first four vertices into a square outline.
