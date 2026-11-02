@@ -140,10 +140,7 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
 
     local perimeter = uiUtils.settings.diveMode == "perimeter" and uiUtils.outerPerimeter(reachable) or nil
 
-    -- Hover mode: only show a destination while the Dive cursor is active.
-    -- todo: hover tile is currently on in both hover mode and perimeter mode
-    -- which should be toggleable. hover tile should also have its own
-    -- customizatble color rgba
+    -- Hover tile: the Dive destination under the cursor while the Dive cursor is active.
     local hoverPath = {}
     local hoverOX, hoverOZ
     if isDiveCursor and not MiniMenu.IsOpen() then
@@ -177,11 +174,16 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
     end
 
 
-    -- todo: put the hardcoded 'false' here into a settings menu
-    local useDiveSurgePreview = false and isDiveCursor
+    -- show where you would surge after you dive
+    local useDiveSurgePreview = uiUtils.settings.surgeFollowsHover and isDiveCursor
     local surgePreview = {}
-    if useDiveSurgePreview and hoverOX and reachable[hoverOX .. "," .. hoverOZ]
-        and uiUtils.settings.showSurge then
+    if (useDiveSurgePreview
+            and hoverOX
+            and reachable[hoverOX .. "," .. hoverOZ]
+            -- should we require surge to be on for this to be on?
+            -- should we allow both to be on at the same time?
+            and uiUtils.settings.showSurge
+        ) then
         local facing = diveDirection.directionForOffset(hoverOX, hoverOZ)
         if facing then
             local dx, dz = diveUtils.compassVector(facing)
@@ -199,13 +201,16 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
         for oz = -RADIUS, RADIUS do
             local tx, tz = playerTileX + ox, playerTileZ + oz
             local key = tx .. "," .. tz
+            local hoverVisible = uiUtils.settings.showHover
+                and reachable[ox .. "," .. oz] and hoverPath[ox .. "," .. oz]
             local diveVisible = reachable[ox .. "," .. oz]
                 and (
                     uiUtils.settings.diveMode == "all" or
-                    (perimeter ~= nil and perimeter[ox .. "," .. oz]) or
-                    (hoverPath ~= nil and hoverPath[ox .. "," .. oz])
+                    (perimeter ~= nil and perimeter[ox .. "," .. oz])
                 )
-            if surgePreview[key] then
+            if hoverVisible then
+                uiUtils.drawTile(tx, tz, plane, uiUtils.hoverRGBA)
+            elseif surgePreview[key] then
                 uiUtils.drawTile(tx, tz, plane, uiUtils.surgeRGBA)
             elseif showPlayerSurgePreview and forward[key] then
                 uiUtils.drawTile(tx, tz, plane, uiUtils.surgeRGBA)
@@ -214,14 +219,14 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
             elseif diveVisible then
                 uiUtils.drawTile(tx, tz, plane, uiUtils.diveRGBA)
             end
-            if uiUtils.settings.showArrows and diveVisible then
+            if uiUtils.settings.showArrows and (diveVisible or hoverVisible) then
                 local angle = diveDirection.directionForOffset(ox, oz)
                 if angle ~= nil then uiUtils.drawDirectionArrow(tx, tz, plane, angle) end
             end
         end
     end
 
-    -- draw surge preview outside of raidus
+    -- draw surge preview outside of radius
     for key in pairs(surgePreview) do
         local tx, tz = key:match("^(-?%d+),(-?%d+)$")
         tx, tz = tonumber(tx), tonumber(tz)

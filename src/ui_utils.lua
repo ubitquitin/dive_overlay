@@ -14,7 +14,10 @@ local DEFAULT_SETTINGS = {
     showEscape = true,
     showArrows = false,
     hideBehind = false,
+    showHover = true,
+    surgeFollowsHover = false,
     diveColour = 0xC8A000FF,
+    hoverColour = 0xC8A000FF,
     surgeColour = 0x1266DFFF,
     escapeColour = 0x008000FF,
 }
@@ -43,7 +46,7 @@ local function loadSettings()
     -- Validate the selected mode.
     if settings.diveMode ~= "all"
         and settings.diveMode ~= "perimeter"
-        and settings.diveMode ~= "hover" then
+        and settings.diveMode ~= "none" then
         settings.diveMode = "all"
     end
 
@@ -66,8 +69,7 @@ function M.saveSettings()
     PersistentDB:SetStructuredData(SETTINGS_KEY, saved)
 end
 
-
--- Helper function that takes the hex input from color pickers and 
+-- Helper function that takes the hex input from color pickers and
 -- converts it into RGBA values, which are passed directly to drawTile.
 --
 -- The first four vertices form the tile outline and retain the selected
@@ -85,6 +87,7 @@ local function colours(colour)
 end
 
 M.diveRGBA = colours(M.settings.diveColour)
+M.hoverRGBA = colours(M.settings.hoverColour)
 M.surgeRGBA = colours(M.settings.surgeColour)
 M.escapeRGBA = colours(M.settings.escapeColour)
 
@@ -114,27 +117,46 @@ function M.openSettings()
     -- creates the prettyUI window
     local parent = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA)
     uiWindow = prettyui.Window.new(parent, {
-        title = "Dive / Surge / Escape", x = 800, y = 200,
-        width = 330, height = uiMinimized and 140 or 415, resizable = true,
-        minWidth = 280, minHeight = 140, scrollable = true,
+        title = "Dive / Surge / Escape",
+        x = 800,
+        y = 200,
+        width = 330,
+        height = uiMinimized and 140 or 415,
+        resizable = true,
+        minWidth = 280,
+        minHeight = 140,
+        scrollable = true,
     })
     -- Adds the section for Dive Tile Mode
     uiWindow:AddTitle("Dive tiles")
     uiWindow:AddRadioButton({
-        {text = "All diveable tiles", value = "all"},
-        {text = "Outer perimeter only", value = "perimeter"},
-        {text = "Hover mode", value = "hover"},
+        { text = "All diveable tiles",   value = "all" },
+        { text = "Outer perimeter only", value = "perimeter" },
+        { text = "None",                 value = "none" },
     }, {
         selectedValue = M.settings.diveMode,
-        onChange = function(_, value) M.settings.diveMode = value M.saveSettings() end,
+        onChange = function(_, value)
+            M.settings.diveMode = value
+            M.saveSettings()
+        end,
+    })
+    uiWindow:AddCheckboxButton({
+        { text = "Hover tile", value = "hover", selected = M.settings.showHover },
+    }, {
+        onChange = function(_, _, changed, selected)
+            if changed ~= "hover" then return end
+            M.settings.showHover = selected
+            M.saveSettings()
+        end,
     })
     -- Adds the section for Overlay tile options
     uiWindow:AddTitle("Overlays")
     uiWindow:AddCheckboxButton({
-        {text = "Surge tiles", value = "surge", selected = M.settings.showSurge},
-        {text = "Escape tiles", value = "escape", selected = M.settings.showEscape},
-        {text = "Dive facing arrows", value = "arrows", selected = M.settings.showArrows},
-        {text = "Hide dive tiles behind", value = "behind", selected = M.settings.hideBehind},
+        { text = "Surge tiles",              value = "surge",             selected = M.settings.showSurge },
+        { text = "Escape tiles",             value = "escape",            selected = M.settings.showEscape },
+        { text = "Dive facing arrows",       value = "arrows",            selected = M.settings.showArrows },
+        { text = "Hide dive tiles behind",   value = "behind",            selected = M.settings.hideBehind },
+        { text = "Surge follows Hover Tile", value = "surgeFollowsHover", selected = M.settings.surgeFollowsHover },
     }, {
         onChange = function(_, _, changed, selected)
             if changed == "surge" then
@@ -145,6 +167,8 @@ function M.openSettings()
                 M.settings.showArrows = selected
             elseif changed == "behind" then
                 M.settings.hideBehind = selected
+            elseif changed == "surgeFollowsHover" then
+                M.settings.surgeFollowsHover = selected
             else
                 return
             end
@@ -156,15 +180,26 @@ function M.openSettings()
     uiWindow:AddTitle("Tile colours")
     uiWindow:AddText("Dive")
     uiWindow:AddColourPicker({
-        value = M.settings.diveColour, alphaSlider = true,
+        value = M.settings.diveColour,
+        alphaSlider = true,
         windowTitle = "Dive tile colour",
         onChange = function(_, value)
             M.setColour("dive", value)
         end,
     })
+    uiWindow:AddText("Hover")
+    uiWindow:AddColourPicker({
+        value = M.settings.hoverColour,
+        alphaSlider = true,
+        windowTitle = "Hover tile colour",
+        onChange = function(_, value)
+            M.setColour("hover", value)
+        end,
+    })
     uiWindow:AddText("Surge")
     uiWindow:AddColourPicker({
-        value = M.settings.surgeColour, alphaSlider = true,
+        value = M.settings.surgeColour,
+        alphaSlider = true,
         windowTitle = "Surge tile colour",
         onChange = function(_, value)
             M.setColour("surge", value)
@@ -172,7 +207,8 @@ function M.openSettings()
     })
     uiWindow:AddText("Escape")
     uiWindow:AddColourPicker({
-        value = M.settings.escapeColour, alphaSlider = true,
+        value = M.settings.escapeColour,
+        alphaSlider = true,
         windowTitle = "Escape tile colour",
         onChange = function(_, value)
             M.setColour("escape", value)
