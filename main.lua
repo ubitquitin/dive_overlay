@@ -173,6 +173,23 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
         end
     end
 
+    -- Expand the resolved Hover Tile into a square of reachable Dive tiles.
+    if hoverOX ~= nil and hoverOZ ~= nil
+        and reachable[hoverOX .. "," .. hoverOZ] then
+
+        local hover_radius = uiUtils.settings.hoverRadius
+
+        for key in pairs(reachable) do
+            local ox, oz = key:match("^(-?%d+),(-?%d+)$")
+            ox, oz = tonumber(ox), tonumber(oz)
+
+            if math.abs(ox - hoverOX) <= hover_radius
+                and math.abs(oz - hoverOZ) <= hover_radius then
+                hoverPath[key] = true
+            end
+        end
+    end
+
 
     -- show where you would surge after you dive
     local useDiveSurgePreview = uiUtils.settings.surgeFollowsHover and isDiveCursor
@@ -205,8 +222,8 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
                 and reachable[ox .. "," .. oz] and hoverPath[ox .. "," .. oz]
             local diveVisible = reachable[ox .. "," .. oz]
                 and (
-                    uiUtils.settings.diveMode == "all" or
-                    (perimeter ~= nil and perimeter[ox .. "," .. oz])
+                    uiUtils.settings.diveMode == "all"
+                    or (perimeter ~= nil and perimeter[ox .. "," .. oz])
                 )
             if hoverVisible then
                 uiUtils.drawTile(tx, tz, plane, uiUtils.hoverRGBA)

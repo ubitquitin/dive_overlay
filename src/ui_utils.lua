@@ -16,10 +16,13 @@ local DEFAULT_SETTINGS = {
     hideBehind = false,
     showHover = true,
     surgeFollowsHover = false,
-    diveColour = 0xC8A000FF,
-    hoverColour = 0xC8A000FF,
+    diveColour = 0xEBC946FF,
+    hoverColour = 0xD70E34FF,
     surgeColour = 0x1266DFFF,
     escapeColour = 0x008000FF,
+    hoverRadius = 0, -- Radius to render dive tiles around the hover tile
+    edgeOpacity = 29, -- Edge alpha as a percentage of the color picker's alpha
+    fillOpacity = 6, -- Fill alpha as a percentage of the color picker's alpha
 }
 
 local function loadSettings()
@@ -43,12 +46,18 @@ local function loadSettings()
         settings[key] = value
     end
 
-    -- Validate the selected mode.
+
     if settings.diveMode ~= "all"
         and settings.diveMode ~= "perimeter"
         and settings.diveMode ~= "none" then
         settings.diveMode = "all"
     end
+
+    settings.hoverRadius = math.max(0,
+        math.min(RADIUS, math.floor(settings.hoverRadius + 0.5)))
+
+    settings.edgeOpacity = math.max(0, math.min(100, settings.edgeOpacity))
+    settings.fillOpacity = math.max(0, math.min(100, settings.fillOpacity))
 
     return settings
 end
@@ -69,28 +78,51 @@ function M.saveSettings()
     PersistentDB:SetStructuredData(SETTINGS_KEY, saved)
 end
 
--- Helper function that takes the hex input from color pickers and
--- converts it into RGBA values, which are passed directly to drawTile.
---
--- The first four vertices form the tile outline and retain the selected
--- colour and opacity. The last four form the tile fill, whose opacity
--- is reduced to 27% of the selected value so the terrain remains visible.
---
--- The RGB channels are preserved for both the outline and fill.
+-- Converts a picker colour into outline and fill vertex colours.
+-- Each opacity setting scales the picker's selected alpha.
 local function colours(colour)
-    -- Picker uses RRGGBBAA. Keep solid outlines and translucent fills.
     local rgb = colour & 0xFFFFFF00
     local alpha = colour & 0xFF
-    local fillAlpha = math.floor(alpha * 0.27)
-    return {rgb | alpha,rgb | alpha,rgb | alpha,rgb | alpha,
-            rgb | fillAlpha,rgb | fillAlpha,rgb | fillAlpha,rgb | fillAlpha}
+
+    local edgeAlpha = math.floor(
+        alpha * M.settings.edgeOpacity / 100 + 0.5
+    )
+    local fillAlpha = math.floor(
+        alpha * M.settings.fillOpacity / 100 + 0.5
+    )
+
+    local edge = rgb | edgeAlpha
+    local fill = rgb | fillAlpha
+
+    return {
+        edge, edge, edge, edge,
+        fill, fill, fill, fill
+    }
 end
 
-M.diveRGBA = colours(M.settings.diveColour)
-M.hoverRGBA = colours(M.settings.hoverColour)
-M.surgeRGBA = colours(M.settings.surgeColour)
-M.escapeRGBA = colours(M.settings.escapeColour)
+-- Rebuild all overlay colours after opacity changes.
+function M.refreshColours()
+    M.diveRGBA = colours(M.settings.diveColour)
+    M.hoverRGBA = colours(M.settings.hoverColour)
+    M.surgeRGBA = colours(M.settings.surgeColour)
+    M.escapeRGBA = colours(M.settings.escapeColour)
+end
 
+M.refreshColours()
+
+-- Update opacity immediately and persist the selection.
+function M.setOpacity(key, value)
+    if key ~= "edgeOpacity" and key ~= "fillOpacity" then
+        return
+    end
+
+    if type(value) ~= "number" then return end
+
+    M.settings[key] = math.max(0, math.min(100, value))
+
+    M.refreshColours()
+    M.saveSettings()
+end
 
 -- Updates a tile colour and its corresponding drawing vertex colours.
 -- Saves the color choice into the settings persistentDB
@@ -140,6 +172,7 @@ function M.openSettings()
             M.saveSettings()
         end,
     })
+   
     uiWindow:AddCheckboxButton({
         { text = "Hover tile", value = "hover", selected = M.settings.showHover },
     }, {
@@ -149,6 +182,19 @@ function M.openSettings()
             M.saveSettings()
         end,
     })
+    uiWindow:AddText("Hover tile radius (tiles)")
+    uiWindow:AddSlider({
+        min = 0,
+        max = RADIUS,
+        step = 1,
+        value = M.settings.hoverRadius,
+        onChange = function(_, value)
+            M.settings.hoverRadius = math.max(0,
+                math.min(RADIUS, math.floor(value + 0.5)))
+            M.saveSettings()
+        end,
+    })
+
     -- Adds the section for Overlay tile options
     uiWindow:AddTitle("Overlays")
     uiWindow:AddCheckboxButton({
@@ -176,6 +222,30 @@ function M.openSettings()
             M.saveSettings()
         end,
     })
+    uiWindow:AddTitle("Tile opacity")
+
+    uiWindow:AddText("Edge opacity (%)")
+    uiWindow:AddSlider({
+        min = 0,
+        max = 100,
+        step = 1,
+        value = M.settings.edgeOpacity,
+        onChange = function(_, value)
+            M.setOpacity("edgeOpacity", value)
+        end,
+    })
+
+    uiWindow:AddText("Fill opacity (%)")
+    uiWindow:AddSlider({
+        min = 0,
+        max = 100,
+        step = 1,
+        value = M.settings.fillOpacity,
+        onChange = function(_, value)
+            M.setOpacity("fillOpacity", value)
+        end,
+    })
+
     -- Adds the section for tile color pickers
     uiWindow:AddTitle("Tile colours")
     uiWindow:AddText("Dive")
@@ -466,5 +536,19 @@ function M.getHoveredDivePosition(playerX, playerZ)
     local angle = math.deg(math.atan(dx, dz)) % 360
     return { angle = math.floor(angle / 45 + 0.5) * 45 % 360 }
 end
+
+print(string.format(
+    "[Dive Defaults] diveColour=0x%08X, hoverColour=0x%08X, surgeColour=0x%08X, escapeColour=0x%08X",
+    M.settings.diveColour,
+    M.settings.hoverColour,
+    M.settings.surgeColour,
+    M.settings.escapeColour
+))
+
+print(string.format(
+    "[Dive Defaults] edgeOpacity=%s, fillOpacity=%s",
+    tostring(M.settings.edgeOpacity),
+    tostring(M.settings.fillOpacity)
+))
 
 return M
