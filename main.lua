@@ -222,8 +222,8 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
                 and reachable[ox .. "," .. oz] and hoverPath[ox .. "," .. oz]
             local diveVisible = reachable[ox .. "," .. oz]
                 and (
-                    uiUtils.settings.diveMode == "all"
-                    or (perimeter ~= nil and perimeter[ox .. "," .. oz])
+                    uiUtils.settings.diveMode == "all" or
+                    (perimeter ~= nil and perimeter[ox .. "," .. oz])
                 )
             if hoverVisible then
                 uiUtils.drawTile(tx, tz, plane, uiUtils.hoverRGBA)

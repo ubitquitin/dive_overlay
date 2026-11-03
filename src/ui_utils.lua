@@ -46,7 +46,7 @@ local function loadSettings()
         settings[key] = value
     end
 
-
+    -- Validate the selected mode.
     if settings.diveMode ~= "all"
         and settings.diveMode ~= "perimeter"
         and settings.diveMode ~= "none" then
@@ -78,9 +78,16 @@ function M.saveSettings()
     PersistentDB:SetStructuredData(SETTINGS_KEY, saved)
 end
 
--- Converts a picker colour into outline and fill vertex colours.
--- Each opacity setting scales the picker's selected alpha.
+-- Helper function that takes the hex input from color pickers and
+-- converts it into RGBA values, which are passed directly to drawTile.
+--
+-- The first four vertices form the tile outline and retain the selected
+-- colour and opacity. The last four form the tile fill, whose opacity
+-- is reduced to 27% of the selected value so the terrain remains visible.
+--
+-- The RGB channels are preserved for both the outline and fill.
 local function colours(colour)
+    -- Picker uses RRGGBBAA. Keep solid outlines and translucent fills.
     local rgb = colour & 0xFFFFFF00
     local alpha = colour & 0xFF
 
@@ -172,7 +179,6 @@ function M.openSettings()
             M.saveSettings()
         end,
     })
-   
     uiWindow:AddCheckboxButton({
         { text = "Hover tile", value = "hover", selected = M.settings.showHover },
     }, {
