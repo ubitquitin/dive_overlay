@@ -5,10 +5,15 @@ This repo encompasses a Runescape 3 Plugin that allows users to see a highlighte
 
 ![How it looks in game](coverphoto.png)
 
-The plugin features a few different modes including:
+The plugin features a few different modes for rendering Dive tiles:
+    - Render all diveable tiles
     - Only highlighting the perimeter of diveable tiles
+    - Only drawing the outer edge of the perimeter of diveable tiles
     - Only highlighting tiles in the direction you are facing
-    - Only highlighting the tile that you will end up on when dive is active, depending on where your mouse is
+    - Only highlighting the tile that you will end up on when dive is active, depending on where your mouse is (Hover Tile)
+
+You can also change the color and opacity of your tile highlights in the settings.
+There is a toggle to show a preview for surge when chaining a dive -> surge.
 
 ## Setup
 
