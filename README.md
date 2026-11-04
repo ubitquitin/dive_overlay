@@ -1,7 +1,7 @@
 
 # The Dive Overlay Plugin
 
-This repo encompasses a Runescape 3 Plugin that allows users to see a highlighted mesh of diveable tiles. As Runescape entities can look misleading, and Dive has a somewhat unintuitive algorithm that does not follow traditional line of sight, we hope that this plugin can help enable players to find better pathing in a wide variety of activities!
+This repo encompasses a Runescape 3 Plugin that allows users to see a highlighted mesh of diveable tiles. As Runescape entities can look misleading, and Dive has a somewhat unintuitive algorithm that does not follow traditional line of sight, we hope that this plugin can help enable players to find better pathing in a wide variety of activities. Say goodbye to 1 tile surging and "You can't dive through something you can't walk through!
 
 ![How it looks in game](coverphoto.png)
 
