@@ -29,7 +29,8 @@ local function loadSettings()
     local settings = {}
 
     for key, default in pairs(DEFAULT_SETTINGS) do
-        local value = type(saved) == "table" and saved[key] or nil
+        local value
+        if type(saved) == "table" then value = saved[key] end
 
         if key:match("Colour$") then
             if type(value) == "string"
