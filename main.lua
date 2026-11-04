@@ -5,9 +5,9 @@
 -- Constants
 local RADIUS = 10 -- Dive radius (tiles)
 local SURGE_RANGE = 10 -- surge range (tiles)
-local DIVE_COOLDOWN_END_PLAYERVAR_ID = 6961 -- Dive Cooldown playervar for player direction update
-local SURGE_COOLDOWN_END_PLAYERVAR_ID = 8670 -- Surge Cooldown playervar for player direction update
-local ESC_COOLDOWN_END_PLAYERVAR_ID = 983 -- Escape Cooldown playervar for player direction update
+local DIVE_COOLDOWN_END_PLAYERVAR_ID = 6961 -- Dive Cooldown End playervar for player direction update
+local SURGE_COOLDOWN_END_PLAYERVAR_ID = 8670 -- Surge Cooldown End playervar for player direction update
+local ESC_COOLDOWN_END_PLAYERVAR_ID = 983 -- Escape Cooldown End playervar for player direction update
 local DIVE_CURSOR_ID = 157 -- Dive Cursor Sprite ID for hover tile rendering when dive active
 local BLADED_DIVE_CURSOR_ID = 42 -- Bladed Dive Cursor Sprite ID for hover tile rendering when dive active
 
@@ -163,6 +163,7 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
     for key in pairs(reach.tiles) do
         local ox, oz = key:match("^(-?%d+),(-?%d+)$")
         ox, oz = tonumber(ox), tonumber(oz)
+        -- Filter based on dot product of player direction and candidate tile
         if uiUtils.isTileInFront(ox, oz, facingX, facingZ) then
             reachable[key] = true
         end
@@ -187,7 +188,7 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
     -- This block of code calculates the angle and tile to fill when in "Hover mode".
     -- "Hover mode" highlights the tile your cursor is on, and shows you the direction 
     -- your character will be facing if you dive there.
-
+    --
     -- We populate hoverPath with the set of tiles to be highlighted (Just the hovered tile or max distance tile)
     -- We populate hoverOx and hoverOz with the player position if they dove to the hovered tile.
     local hoverPath = {}
@@ -334,8 +335,10 @@ end
 -- Shutdown function
 -- Unsubscribe from all created events, and save user UI settings to PersistentDB
 function PluginShutdown()
+    -- Save user UI settings to PersistentDB
     uiUtils.saveSettings()
 
+    -- Unsubscribe from all created events
     Event.SettingsLayerReady.Unsubscribe("diveOverlaySettings")
     Event.Draw.Unsubscribe('bladedDiveTiles')
     Event.MiniMenuReady.Unsubscribe("diveCursorCheck")

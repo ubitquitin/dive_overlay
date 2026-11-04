@@ -60,6 +60,8 @@ local diveGrid = {
 
 -- Look up the facing that Dive produces for a relative tile offset.
 -- The lookup is only defined for integer offsets inside the 21x21 grid.
+-- This function is used both for keeping track of player direction, and 
+-- calculating direction based on potential offsets when rendering predictive arrows.
 function M.directionForOffset(dx, dz)
     if type(dx) ~= "number" or type(dz) ~= "number" then
         return nil
@@ -80,6 +82,7 @@ function M.directionForOffset(dx, dz)
 
     -- Convert signed offsets to Lua's 1-based row/column indices.
     local angle = diveGrid[11 - dz][11 + dx]
+    -- Return the fetched angle (degrees)
     return type(angle) == "number" and angle or nil
 end
 
@@ -89,7 +92,7 @@ local function gameCompass(facing)
     return (facing + FACING_OFFSET_DEGREES) % 360
 end
 
-
+-- Utility function to check if an ability cooldown has fired.
 -- A changed numeric cooldown value is our signal that an ability activated.
 -- Missing/non-numeric reads do not count as changes.
 local function changed(now, before, key)
@@ -99,6 +102,8 @@ local function changed(now, before, key)
 end
 
 -- Utility for extracting cooldown states into a new dictionary
+-- Used to copy previous cooldowns into current state upon app startup
+-- or plane change.
 local function copyCooldowns(c)
     return {
         diveEnd = c.diveEnd,
@@ -107,6 +112,7 @@ local function copyCooldowns(c)
     }
 end
 
+-- Utility distance function
 local function gridDistance(dx, dz)
     return math.max(math.abs(dx), math.abs(dz))
 end
@@ -130,6 +136,8 @@ local lastGameFacing
 local lastDX, lastDZ = 0, 0
 local jumpPending = false
 
+-- clear tracking states
+-- Used on initialization of the plugin
 function M.clear()
     lastX, lastZ, lastPlane = nil, nil, nil
     lastCooldowns = nil
@@ -139,6 +147,7 @@ function M.clear()
     lastGameFacing = nil
 end
 
+-- exposes the effective var as a GETTER function to the public
 function M.getDirection()
     return effective
 end
@@ -152,10 +161,12 @@ local COMPASS = {
     [-1] = { [1] = 315, [0] = 270, [-1] = 225 },
 }
 
+-- Utility to get the sign of n
 local function sign(n)
     return n > 0 and 1 or (n < 0 and -1 or 0)
 end
 
+-- Utility to check if a step is diagonal (both magnitude x and z = 1)
 local function isDiagonalStep(dx, dz)
     return math.abs(dx) == 1 and math.abs(dz) == 1
 end
@@ -189,8 +200,10 @@ end
 -- asymmetrical and why all of these workarounds were needed, but I'm happy enough
 -- with the end results outside of the 1 known mis-prediction,
 local function routeCompass(player, previous)
+    -- get the player coordGrid
     local here = player.coordGrid
     if not here then return nil end
+    -- get the player route
     local route = player.route or {}
 
     -- Path: current tile, then the route without consecutive duplicates
@@ -202,6 +215,7 @@ local function routeCompass(player, previous)
         end
     end
 
+    -- n is the length of the player Path
     local n = #path
     if n < 2 then return nil end
 
@@ -257,17 +271,23 @@ end
 -- new ordinary movement begins after the Dive movement has finished.
 -- Surge and Escape never use the Dive grid.
 function M.update(player, cooldowns)
+    -- get player coordGrid
     local grid = player and player.coordGrid
     if not grid then
         return effective
     end
 
+    -- get Player x, z, plane and facing vars
     local x, z, plane = grid.x, grid.z, grid.level
     local facing = player.facing
+    -- Uses routeCompass() to calculate where the player will be facing based on their movement route
     local routeFacing = routeCompass(player, effective)
 
+    -- get the cooldown playerVars
     cooldowns = cooldowns or {}
+    -- get the current direction player is facing
     local currentFacing = gameCompass(facing)
+    -- flag if the direction has changed since the last tick
     local facingChanged = currentFacing ~= nil and lastGameFacing ~= nil
         and currentFacing ~= lastGameFacing
 
@@ -297,16 +317,23 @@ function M.update(player, cooldowns)
         end
     end
 
+    -- calc displacement and flag if we have moved since last tick
     local dx, dz = x - lastX, z - lastZ
     local moved = dx ~= 0 or dz ~= 0
 
+    -- check if we have dove or surged over 9 tiles. In this case ability updates one tick later,
+    -- so jumpPending is set to true to offset
     if gridDistance(dx, dz) >= LONG_MOVE_DISTANCE and not ability then
         -- Long move with no signal yet: probably Dive or Surge, whose cooldown
         -- change arrives next tick. Either way, the dive lookup of the offset
         -- gives the right facing (a surge goes straight along the facing), so
         -- show it now; next tick's signal confirms or corrects it.
         jumpPending = true
+        -- set effective direction to the diveGrid lookup based on the offsets
         effective = M.directionForOffset(dx, dz) or effective
+    
+    -- else check for if jumpPending and set diveOrderride flag based on if dive should override
+    -- player.facing or not
     else
         local hadJump = jumpPending
         jumpPending = false
@@ -330,6 +357,7 @@ function M.update(player, cooldowns)
             end
         end
 
+        -- Update effective, our effective facing direction we return
         if diveOverride ~= nil then
             -- After Dive: do NOT restore stale game-facing.
             effective = diveOverride

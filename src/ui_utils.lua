@@ -8,6 +8,8 @@ local GROUND_OFFSET = 30
 -- UI state; original default colours retained.
 local SETTINGS_KEY = "diveOverlaySettings"
 
+-- Default settings for tile rendering
+-- These will be loaded if overrides havent been made and saved to PersistentDB
 local DEFAULT_SETTINGS = {
     diveMode = "all",
     showSurge = true,
@@ -24,13 +26,19 @@ local DEFAULT_SETTINGS = {
     fillOpacity = 6, -- Fill alpha as a percentage of the color picker's alpha
 }
 
+-- Load the existing settinsg from PersistentDB
+-- For each of the settings, get the value, convert RGBA strings to a numbers
+-- We store settings into a local dictionary
 local function loadSettings()
+    -- Get the saved data from the PersistentDB
     local saved = PersistentDB:GetStructuredData(SETTINGS_KEY)
     local settings = {}
 
     for key, default in pairs(DEFAULT_SETTINGS) do
         local value = type(saved) == "table" and saved[key] or nil
-
+        
+        -- We currently store the RGBA colors for tiles as strings in the PersistentDB
+        -- This code block converts them back to numbers before loading into settings dict.
         if key:match("Colour$") then
             if type(value) == "string"
                 and value:match("^%x%x%x%x%x%x%x%x$") then
@@ -53,17 +61,23 @@ local function loadSettings()
         settings.diveMode = "all"
     end
 
+    -- Set the opacities
     settings.edgeOpacity = math.max(0, math.min(100, settings.edgeOpacity))
     settings.fillOpacity = math.max(0, math.min(100, settings.fillOpacity))
 
     return settings
 end
 
+-- Store settings into local var
 M.settings = loadSettings()
 
+-- This function is called on Plugin Shutdown
+-- It persists the currently active settings to the DB.
 function M.saveSettings()
     local saved = {}
 
+    -- For each setting, save it to the `saved` dict.
+    -- Transform Color settings from RBGA int to string.
     for key, value in pairs(M.settings) do
         if key:match("Colour$") then
             saved[key] = string.format("%08X", value)
@@ -72,6 +86,7 @@ function M.saveSettings()
         end
     end
 
+    -- Push local `saved` dict to PersistentDB
     PersistentDB:SetStructuredData(SETTINGS_KEY, saved)
 end
 
@@ -80,24 +95,30 @@ end
 --
 -- The first four vertices form the tile outline and retain the selected
 -- colour and opacity. The last four form the tile fill, whose opacity
--- is reduced to 27% of the selected value so the terrain remains visible.
+-- is adjusted based on the user setting.
 --
 -- The RGB channels are preserved for both the outline and fill.
+-- This function is called when setting changes trigger a color refresh,
+-- such as changing opacity, or changing tile color in the colorpickers.
 local function colours(colour)
     -- Picker uses RRGGBBAA. Keep solid outlines and translucent fills.
-    local rgb = colour & 0xFFFFFF00
-    local alpha = colour & 0xFF
+    local rgb = colour & 0xFFFFFF00 -- get the 6 digit RGB value
+    local alpha = colour & 0xFF -- get the 2 digit trailing Alpha value
 
+    -- Isolate edgeAlpha based on color alpha and edgeOpacity setting
     local edgeAlpha = math.floor(
         alpha * M.settings.edgeOpacity / 100 + 0.5
     )
+    -- Isolate tile fillAlpha based on color alpha and fillOpacity setting
     local fillAlpha = math.floor(
         alpha * M.settings.fillOpacity / 100 + 0.5
     )
 
+    -- Get the final RGBA values for edge and fill
     local edge = rgb | edgeAlpha
     local fill = rgb | fillAlpha
 
+    -- return the 4 edges and 4 tris RGBA values
     return {
         edge, edge, edge, edge,
         fill, fill, fill, fill
@@ -115,6 +136,8 @@ end
 M.refreshColours()
 
 -- Update opacity immediately and persist the selection.
+-- This is called when the user changes an opacity slider for
+-- Edge or Fill opacity.
 function M.setOpacity(key, value)
     if key ~= "edgeOpacity" and key ~= "fillOpacity" then
         return
@@ -123,13 +146,15 @@ function M.setOpacity(key, value)
     if type(value) ~= "number" then return end
 
     M.settings[key] = math.max(0, math.min(100, value))
-
+    -- Refresh fill and edge alphas in tile colors based on opacity changes
     M.refreshColours()
+    -- Persist Settings to DB
     M.saveSettings()
 end
 
 -- Updates a tile colour and its corresponding drawing vertex colours.
 -- Saves the color choice into the settings persistentDB
+-- This is called when a tile color is set in the colorpickers
 function M.setColour(kind, value)
     local settingKey = kind .. "Colour"
     local rgbaKey = kind .. "RGBA"
@@ -138,13 +163,17 @@ function M.setColour(kind, value)
     if type(value) ~= "number" then return end
 
     M.settings[settingKey] = value
+    -- Convert the hexadecimal value from the colorpicker to RGBA
+    -- Set the corresponding setting color key to the RGA value.
     M[rgbaKey] = colours(value)
 
+    -- Persist Settings to DB
     M.saveSettings()
 end
 
 
--- Function that is called when the user clicks the open settings button in the plugin settings UI
+-- Function that is called when the user clicks the open settings button 
+-- in the plugin settings UI.
 -- constructs a pretty UI window with toggles for dive overlays, modes and tile color pickers
 function M.openSettings()
     -- initialize the prettyUI window
@@ -165,6 +194,11 @@ function M.openSettings()
     })
     -- Adds the section for Dive Tile Mode
     uiWindow:AddTitle("Dive tiles")
+    -- Adds a radiobutton allowing the user to select the tile render mode
+    -- All Diveable Tiles renders all tiles that are calculated as reachable
+    -- Outer Perimeter Only uses FloodFilling algorithm to just render outermost perimeter
+    -- Perimeter edges only is the same as above but only renders the outermost edges.
+    -- None Renders no tiles.
     uiWindow:AddRadioButton({
         { text = "All diveable tiles",    value = "all" },
         { text = "Outer perimeter only",  value = "perimeter" },
@@ -177,6 +211,8 @@ function M.openSettings()
             M.saveSettings()
         end,
     })
+    -- Adds a checkbox for Hover Tile.
+    -- This creates a tile overlay on the actively hovered tile by the player's cursor.
     uiWindow:AddCheckboxButton({
         { text = "Hover tile", value = "hover", selected = M.settings.showHover },
     }, {
@@ -188,7 +224,15 @@ function M.openSettings()
     })
 
     -- Adds the section for Overlay tile options
+    -- These overlays add additional customization to what the user wants to see.
     uiWindow:AddTitle("Overlays")
+    -- Adds checkbox buttons for the different toggles.
+    -- Surge tiles toggles on/off viewing where the player will surge to.
+    -- Escape tiles toggles on/off viewing where the player will escape to.
+    -- Dive facing arrows renders small arrows indicating player direction for each diveable tile.
+    -- Hide dive tiles behind uses the player direction to NOT render any tiles behind the player
+    -- Surge follows Hover tile allows the surge indicator to move with the hovertile
+    -- This is useful for lining up dive->surges.
     uiWindow:AddCheckboxButton({
         { text = "Surge tiles",              value = "surge",             selected = M.settings.showSurge },
         { text = "Escape tiles",             value = "escape",            selected = M.settings.showEscape },
@@ -214,8 +258,10 @@ function M.openSettings()
             M.saveSettings()
         end,
     })
-    uiWindow:AddTitle("Tile opacity")
 
+    -- Opacity controls
+    uiWindow:AddTitle("Tile opacity")
+    -- Slider for setting tile edge drawing opacity
     uiWindow:AddText("Edge opacity (%)")
     uiWindow:AddSlider({
         min = 0,
@@ -226,7 +272,7 @@ function M.openSettings()
             M.setOpacity("edgeOpacity", value)
         end,
     })
-
+    -- Slider for setting tile fill drawing opacity
     uiWindow:AddText("Fill opacity (%)")
     uiWindow:AddSlider({
         min = 0,
@@ -241,6 +287,7 @@ function M.openSettings()
     -- Adds the section for tile color pickers
     uiWindow:AddTitle("Tile colours")
     uiWindow:AddText("Dive")
+    -- Color picker for the Diveable tiles color
     uiWindow:AddColourPicker({
         value = M.settings.diveColour,
         alphaSlider = true,
@@ -249,6 +296,7 @@ function M.openSettings()
             M.setColour("dive", value)
         end,
     })
+    -- Color picker for the hover tile color
     uiWindow:AddText("Hover")
     uiWindow:AddColourPicker({
         value = M.settings.hoverColour,
@@ -258,6 +306,7 @@ function M.openSettings()
             M.setColour("hover", value)
         end,
     })
+    -- Color picker for the Surge tiles color
     uiWindow:AddText("Surge")
     uiWindow:AddColourPicker({
         value = M.settings.surgeColour,
@@ -267,6 +316,7 @@ function M.openSettings()
             M.setColour("surge", value)
         end,
     })
+    -- Color picker for the Escape tiles color
     uiWindow:AddText("Escape")
     uiWindow:AddColourPicker({
         value = M.settings.escapeColour,
@@ -287,6 +337,7 @@ function M.buildSettings(parent)
     button:SetPos(12, 20)
     button:SetSize(200, 36)
 
+    -- When the button is pressed, open the PrettyUI window for settings
     button:Subscribe(ui.Hook.ONBUTTONPRESSED, function()
         M.openSettings()
     end)
@@ -476,7 +527,7 @@ function M.drawDirectionArrow(x, z, plane, angle)
 end
 
 
--- DONT LOOK BACK MODE UTILITY
+-- Used for "Hide Tiles Behind" Toggle:
 -- Determines whether a Dive tile should be displayed based on the
 -- player's facing direction and the "Hide dive tiles behind" setting.
 --
@@ -565,24 +616,34 @@ function M.outerPerimeter(reachable)
     return border, exterior
 end
 
--- dive seems to have 2 distinct modes:
+-- Utility for Hover Tile to get the player position after diving
+-- This allows us to predict where the player will land given their 
+-- cursor position, including hovering out of the 10 tile radius.
+--
+-- Dive seems to have 2 distinct modes:
 -- 1. if within 10 tiles, it goes towards a tile directly
 -- 2. if outside of 10 tiles, it snaps to the 8 octilinear directions
 --    (N, NE, E, etc.)
 -- mode 1 returns a tile, mode 2 returns an angle
 function M.getHoveredDivePosition(playerX, playerZ)
+    -- Get the mouse position and convert to coordGrid
     local mousePos = Mouse.GetPosition()
     local mouseTile = mousePos and ScreenConvert.ScreenToCoordGrid(mousePos)
     if not mouseTile then return {} end
 
+    -- get the offsets from the mouse position tiles and the player tiles
     local dx = mouseTile.x - playerX
     local dz = mouseTile.z - playerZ
 
+    -- Mode 1:
     -- Grid distance: diagonal steps count as one tile
     if math.max(math.abs(dx), math.abs(dz)) <= 10 then
         return { tile = mouseTile }
     end
 
+    -- Mode 2:
+    -- Get the angle of the offset
+    -- Use modulus operator to snap to an octilinear direaction and return angle
     local angle = math.deg(math.atan(dx, dz)) % 360
     return { angle = math.floor(angle / 45 + 0.5) * 45 % 360 }
 end
