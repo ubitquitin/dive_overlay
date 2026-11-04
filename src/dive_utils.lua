@@ -128,11 +128,11 @@ end
 --
 -- In main.lua, the player's effective facing direction is obtained from
 -- dive_direction.lua and passed into compassVector(). The resulting (dx, dz)
--- is then passed to traceStraightLine(), which checks tiles in that direction
--- up to the ability's maximum range.
+-- is then passed to active_tiles.traceLine(), which checks tiles in that
+-- direction up to the ability's maximum range.
 --
 -- For example, facing Northeast (45 degrees) returns (1, 1).
--- traceStraightLine() then examines (x+1, z+1), (x+2, z+2), etc.
+-- traceLine() then examines (x+1, z+1), (x+2, z+2), etc.
 --
 -- The lookup table contains the 8 compass directions, ordered clockwise
 -- from North. Each entry specifies how X and Z change for one tile of
@@ -158,47 +158,6 @@ local compass = {
 function M.compassVector(degrees)
     local sector = math.floor(((degrees % 360) + 22.5) / 45) % 8 + 1
     return compass[sector][1], compass[sector][2]
-end
-
-
--- Finds reachable tiles along a straight compass direction for Surge/Escape.
---
--- startX, startZ: Player's current tile.
--- dx, dz: Direction vector from compassVector(), each component -1, 0, or 1.
--- plane: Current map plane.
--- maxRange: Maximum number of tiles to examine in the given direction.
---
--- First, find the furthest destination that passes isDiveable().
--- Then, collect all valid destinations up to that distance.
---
--- IMPORTANT: This does not require every intermediate destination to be
--- reachable. A failed destination does not stop the search, because a
--- farther destination may still pass the Dive path simulation.
---
--- Returns a set of tile coordinates keyed as "x,z", with value true.
-function M.traceStraightLine(startX, startZ, dx, dz, plane, maxRange)
-    local tiles, furthest = {}, 0
-
-    -- Pass 1: Find the furthest valid destination within the maximum range.
-    for distance = 1, maxRange do
-        local tx, tz = startX + dx * distance, startZ + dz * distance
-
-        if M.isDiveable(startX, startZ, tx, tz, plane) then
-            furthest = distance
-        end
-    end
-
-    -- Pass 2: Mark all individually reachable destinations up to that distance.
-    -- Tiles that fail isDiveable() are skipped, even if they lie before furthest.
-    for distance = 1, furthest do
-        local tx, tz = startX + dx * distance, startZ + dz * distance
-
-        if M.isDiveable(startX, startZ, tx, tz, plane) then
-            tiles[tx .. "," .. tz] = true
-        end
-    end
-
-    return tiles
 end
 
 

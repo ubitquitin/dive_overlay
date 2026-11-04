@@ -1,8 +1,10 @@
 -- User-facing settings, UI controls, tile rendering, and display filters.
 -- Movement and collision decisions deliberately live in other modules.
+
+local diveUtils = require("src/dive_utils")
+
 local M = {}
 local TILE_SIZE = 512
-local RADIUS = 10
 local GROUND_OFFSET = 30
 
 -- UI state; original default colours retained.
@@ -144,7 +146,6 @@ function M.setColour(kind, value)
     M.saveSettings()
 end
 
-
 -- Function that is called when the user clicks the open settings button in the plugin settings UI
 -- constructs a pretty UI window with toggles for dive overlays, modes and tile color pickers
 function M.openSettings()
@@ -167,10 +168,10 @@ function M.openSettings()
     -- Adds the section for Dive Tile Mode
     uiWindow:AddTitle("Dive tiles")
     uiWindow:AddRadioButton({
-        { text = "All diveable tiles",    value = "all" },
-        { text = "Outer perimeter only",  value = "perimeter" },
-        { text = "Perimeter edges only",  value = "edges" },
-        { text = "None",                  value = "none" },
+        { text = "All diveable tiles",   value = "all" },
+        { text = "Outer perimeter only", value = "perimeter" },
+        { text = "Perimeter edges only", value = "edges" },
+        { text = "None",                 value = "none" },
     }, {
         selectedValue = M.settings.diveMode,
         onChange = function(_, value)
@@ -293,17 +294,16 @@ function M.buildSettings(parent)
     end)
 end
 
-
 -- Vertex indices used by ShapeList.Draw when rendering a tile.
 -- 'lines' connects the first four vertices into a square outline.
 -- 'tris' connects the last four vertices into two triangles for the fill.
-local lines = {0,1,1,2,2,3,3,0}
-local tris = {4,5,6,4,6,7}
+local lines = { 0, 1, 1, 2, 2, 3, 3, 0 }
+local tris = { 4, 5, 6, 4, 6, 7 }
 
 
 -- Retrieves the terrain height at a specific world position and plane.
 -- Based on https://github.com/PrettyRS/tilemarkers/blob/main/src/draw.lua
--- 
+--
 -- Used by tileCorners() and drawDirectionArrow() to position overlay
 -- graphics above the actual ground instead of using the player's height.
 -- Returns nil if the terrain height is unavailable or the API fails.
@@ -317,7 +317,7 @@ end
 -- Constructs the eight vertices used to draw a tile overlay.
 --
 -- Based on https://github.com/PrettyRS/tilemarkers/blob/main/src/draw.lua
--- 
+--
 -- RuneScape tile coordinates are converted into world positions using
 -- TILE_SIZE (512 world units per tile). We sample the terrain height
 -- independently at each of the tile's four corners so the overlay
@@ -359,7 +359,7 @@ end
 -- Draws a coloured tile overlay at the specified world tile coordinate.
 --
 -- Based on https://github.com/PrettyRS/tilemarkers/blob/main/src/draw.lua
--- 
+--
 -- main.lua calls this for tiles that should be highlighted as reachable
 -- by Dive, Surge, or Escape, passing the corresponding colour array.
 --
@@ -368,25 +368,20 @@ end
 function M.drawTile(x, z, plane, colors)
     local shapePositions = tileCorners(x, z, plane)
     if not shapePositions then return end
-    ShapeList.Draw{
+    ShapeList.Draw {
         shapePositions = shapePositions,
         shapeRGBA = colors,
         shapeLines = lines,
         shapeTris = tris,
-        translation = Vector3.new(x*TILE_SIZE + TILE_SIZE/2, 0, z*TILE_SIZE + TILE_SIZE/2),
+        translation = Vector3.new(x * TILE_SIZE + TILE_SIZE / 2, 0, z * TILE_SIZE + TILE_SIZE / 2),
         ignoreDepth = true,
         lineWidth = 3
     }
 end
 
-
--- Draw only tile edges touching the exterior flood-filled region.
--- Does not draw fills, internal edges, or edges around enclosed holes.
-function M.drawPerimeterEdges(x, z, plane, ox, oz, exterior)
-    local function key(dx, dz)
-        return dx .. "," .. dz
-    end
-
+-- Draw only the tile edges in edgeMask (S=1, E=2, N=4, W=8), as set in
+-- perimeterEdges by active_tiles.applyPerimeter.
+function M.drawPerimeterEdges(x, z, plane, edgeMask)
     -- tileCorners returns SW, SE, NE, NW as its first four vertices.
     local corners = tileCorners(x, z, plane)
     if not corners then return end
@@ -394,32 +389,32 @@ function M.drawPerimeterEdges(x, z, plane, ox, oz, exterior)
     local edgeLines = {}
 
     -- South: SW -> SE
-    if exterior[key(ox, oz - 1)] then
+    if edgeMask & 1 ~= 0 then
         edgeLines[#edgeLines + 1] = 0
         edgeLines[#edgeLines + 1] = 1
     end
 
     -- East: SE -> NE
-    if exterior[key(ox + 1, oz)] then
+    if edgeMask & 2 ~= 0 then
         edgeLines[#edgeLines + 1] = 1
         edgeLines[#edgeLines + 1] = 2
     end
 
     -- North: NE -> NW
-    if exterior[key(ox, oz + 1)] then
+    if edgeMask & 4 ~= 0 then
         edgeLines[#edgeLines + 1] = 2
         edgeLines[#edgeLines + 1] = 3
     end
 
     -- West: NW -> SW
-    if exterior[key(ox - 1, oz)] then
+    if edgeMask & 8 ~= 0 then
         edgeLines[#edgeLines + 1] = 3
         edgeLines[#edgeLines + 1] = 0
     end
 
     if #edgeLines == 0 then return end
 
-    ShapeList.Draw{
+    ShapeList.Draw {
         shapePositions = {
             corners[1], corners[2], corners[3], corners[4]
         },
@@ -466,105 +461,36 @@ function M.drawDirectionArrow(x, z, plane, angle)
         Vector3.new(fx * len * 0.62, 0, fz * len * 0.62),
         Vector3.new(fx * len * 0.18 - rx * wing, 0, fz * len * 0.18 - rz * wing),
     }
-    ShapeList.Draw{
+    ShapeList.Draw {
         shapePositions = arrowPoints,
-        shapeRGBA = {0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF},
-        shapeLines = {0,1,2,3,3,4},
-        translation = Vector3.new(x*TILE_SIZE + TILE_SIZE/2, y + 125, z*TILE_SIZE + TILE_SIZE/2),
+        shapeRGBA = { 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF },
+        shapeLines = { 0, 1, 2, 3, 3, 4 },
+        translation = Vector3.new(x * TILE_SIZE + TILE_SIZE / 2, y + 125, z * TILE_SIZE + TILE_SIZE / 2),
         ignoreDepth = true,
         lineWidth = 3,
     }
 end
 
-
 -- DONT LOOK BACK MODE UTILITY
--- Determines whether a Dive tile should be displayed based on the
--- player's facing direction and the "Hide dive tiles behind" setting.
+-- Determines whether a Dive tile is in front of the player, for the
+-- "Hide dive tiles behind" setting.
 --
--- main.lua supplies the tile's relative offset (dx, dz) and the player's
--- facing direction as a compass vector (facingX, facingZ).
+-- main.lua supplies an active tile record (its offset from the player is
+-- tile.ox, tile.oz) and the player's facing in compass degrees, which is
+-- converted to a compass vector (facingX, facingZ).
 --
 -- The dot product measures whether the tile lies in front of the player:
 --   Positive: Tile is in front of the player.
 --   Negative: Tile is behind the player.
 --   Zero: Tile is perpendicular to the player's facing direction.
 --
--- When Hide Behind is enabled, only tiles in the forward-facing half-plane
--- (including perpendicular tiles) are displayed.
--- If disabled or facing is unavailable, all tiles pass the filter.
-function M.isTileInFront(dx, dz, facingX, facingZ)
-    if not M.settings.hideBehind or facingX == nil then
-        return true
-    end
-
-    return dx * facingX + dz * facingZ >= 0
+-- Tiles in the forward-facing half-plane (including perpendicular tiles)
+-- count as in front.
+function M.isTileInFront(tile, facing)
+    local facingX, facingZ = diveUtils.compassVector(facing)
+    return tile.ox * facingX + tile.oz * facingZ >= 0
 end
 
-
--- PERIMETER ONLY MODE UTILITY
--- Filters a set of reachable Dive tiles to only its OUTER perimeter.
---
--- Used when the user selects "Outer perimeter only" in the settings.
--- main.lua supplies the reachable tiles as a set of relative coordinates
--- keyed by "dx,dz", where (0,0) represents the player's tile.
---
--- To distinguish the outside boundary from internal holes, we:
--- 1. Start outside the 10-tile search area.
--- 2. Flood-fill through tiles that are NOT reachable by Dive.
--- 3. Mark all unreachable tiles connected to the outside.
--- 4. Keep only reachable tiles that border this exterior area.
---
--- Unreachable pockets completely enclosed by reachable tiles are not
--- connected to the outside, so their edges are excluded.
---
--- Returns a new set containing only the outer perimeter tiles.
-function M.outerPerimeter(reachable)
-    local exterior, queue = {}, {}
-
-    -- Converts relative tile coordinates into the string key format
-    -- used by the reachable and exterior tile sets.
-    local function key(x,z) return x .. "," .. z end
-
-    -- Adds an unreachable tile to the flood-fill queue if it is within
-    -- the search boundary and has not already been visited.
-    -- Reachable tiles act as barriers that the flood fill cannot cross.
-    local function enqueue(x,z)
-        if x < -RADIUS-1 or x > RADIUS+1
-            or z < -RADIUS-1 or z > RADIUS+1 then return end
-        local k = key(x,z)
-        if exterior[k] or reachable[k] then return end
-        exterior[k] = true
-        queue[#queue+1] = {x,z}
-    end
-
-    -- initial outer tile to start from
-    enqueue(-RADIUS-1, -RADIUS-1)
-    -- Explore all unreachable tiles connected to the outside.
-    -- The queue grows as neighboring tiles are discovered.
-    local head = 1
-    while head <= #queue do
-        local node = queue[head]
-        head = head + 1
-        local x,z = node[1],node[2]
-        enqueue(x+1,z)
-        enqueue(x-1,z)
-        enqueue(x,z+1)
-        enqueue(x,z-1)
-    end
-    -- Find reachable tiles adjacent to the exterior region.
-    -- These tiles form the visible outer boundary of the Dive area.
-    local border = {}
-    for dx = -RADIUS,RADIUS do
-        for dz = -RADIUS,RADIUS do
-            local k = key(dx,dz)
-            if reachable[k] and (
-                exterior[key(dx+1,dz)] or exterior[key(dx-1,dz)]
-                or exterior[key(dx,dz+1)] or exterior[key(dx,dz-1)]
-            ) then border[k] = true end
-        end
-    end
-    return border, exterior
-end
 
 -- dive seems to have 2 distinct modes:
 -- 1. if within 10 tiles, it goes towards a tile directly
