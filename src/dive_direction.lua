@@ -23,7 +23,7 @@ local M = {}
 -- Translate the game's facing convention into compass degrees.
 local FACING_OFFSET_DEGREES = 180
 -- Number of tiles for a movement to be considered "long"
--- This effects dive
+-- If a dive is long enough, the cooldown playervar updates one tick later.
 local LONG_MOVE_DISTANCE = 9
 
 -- Compass degree directions

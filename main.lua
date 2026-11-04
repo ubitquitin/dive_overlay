@@ -1,24 +1,26 @@
 -- Dive Overlay entry point.
--- Each frame: update collision data -> determine effective facing ->
--- filter candidate Dive tiles -> evaluate reachability ->
--- apply perimeter filtering -> render overlays.
-local RADIUS = 10
-local SURGE_RANGE = 10
-local DIVE_COOLDOWN_END_PLAYERVAR_ID = 6961
-local SURGE_COOLDOWN_END_PLAYERVAR_ID = 8670
-local ESC_COOLDOWN_END_PLAYERVAR_ID = 983
-local DIVE_CURSOR_ID = 157
-local BLADED_DIVE_CURSOR_ID = 42
+-- Each tick: update collision data if changed -> determine effective facing ->
+-- filter candidate Dive tiles -> render overlays.
+
+-- Constants
+local RADIUS = 10 -- Dive radius (tiles)
+local SURGE_RANGE = 10 -- surge range (tiles)
+local DIVE_COOLDOWN_END_PLAYERVAR_ID = 6961 -- Dive Cooldown playervar for player direction update
+local SURGE_COOLDOWN_END_PLAYERVAR_ID = 8670 -- Surge Cooldown playervar for player direction update
+local ESC_COOLDOWN_END_PLAYERVAR_ID = 983 -- Escape Cooldown playervar for player direction update
+local DIVE_CURSOR_ID = 157 -- Dive Cursor Sprite ID for hover tile rendering when dive active
+local BLADED_DIVE_CURSOR_ID = 42 -- Bladed Dive Cursor Sprite ID for hover tile rendering when dive active
 
 -- Whether the cursor currently displays the Dive sprite.
 local isDiveCursor = false
 
+-- Required utils
 local collisionManager = require("src/collision_manager/collision_manager")
 local diveDirection = require("src/dive_direction")
 local diveUtils = require("src/dive_utils")
 local uiUtils = require("src/ui_utils")
 
--- Read a player var safely: a missing var must not abort drawing.
+-- Utility function to read a player var safely: a missing var must not abort drawing.
 local function vp(id)
     local ok, value = pcall(function()
         local configVar = var.VarPlayer.FromID(id)
@@ -36,27 +38,37 @@ end)
 
 -- MiniMenu entries are ordered from lowest to highest priority.
 -- The last entry controls the cursor when the menu is closed.
+-- Checks whether or not the cursor is a dive sprite
 Event.MiniMenuReady.Subscribe("diveCursorCheck", function(event)
     isDiveCursor = false
 
     local entries = event.miniMenu.entries
     local entry = entries[#entries]
 
+    -- handle empty cases
     if not entry or not entry.cursorID or entry.cursorID < 0 then
         return
     end
 
+    -- check if cursor is either of the valid Dive sprites
     if entry.cursorID == BLADED_DIVE_CURSOR_ID or entry.cursorID == DIVE_CURSOR_ID then
         isDiveCursor = true
     end
 end)
 
 
--- shift as much calculation as we can into the tick so we only have to pay
--- for it once every 600ms. This is still a noticable frame hitch and could use
--- more optimization
+-- Data structure to store info on reachable tiles and player direction.
 local reach = { tiles = {}, x = nil, z = nil, level = nil, facing = nil }
+
+-- This function is called once per Runescape gametick. 
+-- It calculates the player's location, fetches static cached collision data for all map chunks (64x64) 
+-- that intersect the 20 tile radius of the player, and dynamic collision data from LocType entities within 
+-- the 20 tile radius. 
+-- It then creates a mask of diveable tiles (var tiles) by applying the dive algorithm to the collision data
+-- for each tile in the radius. Finally, it calculates player direction by either polling the player facing
+-- or if dive was used, referencing the empirical dive direction grid in dive_direction.lua.
 local function doTick()
+    -- Get player self
     local self = PlayerList.Self()
     if self == nil then
         diveDirection.clear()
@@ -75,6 +87,10 @@ local function doTick()
     -- Then, reconstruct effective collision flags from nearby game objects.
     collisionManager.rebuildCollisionOverrides(coordGrid, RADIUS * 2)
 
+    -- For each tile in the 21x21 area around the player, calculate if diveable
+    -- This creates a mask of diveable tiles in the local var.
+    -- isDiveable applies the dive algorithm (coded in diveUtils).
+    -- It references the collisionManager's current collision data state when doing so.
     local tiles = {}
     for ox = -RADIUS, RADIUS do
         for oz = -RADIUS, RADIUS do
@@ -90,6 +106,8 @@ local function doTick()
 
     -- Update the effective facing direction once per game tick.
     -- This handles ordinary movement, Dive overrides, and ability cooldowns.
+    -- We pass in the cooldown playervars to identify if we should simply trust PlayerType.facing
+    -- or if we should reference the empirical dive direction grid (dive doesnt update PlayerType.facing)
     local effectiveFacing = diveDirection.update(
         self,
         {
@@ -99,23 +117,35 @@ local function doTick()
         }
     )
 
+    -- Save off necessary data to data structure.
     -- Swap in one go so Draw never sees a half-built set
     reach = { tiles = tiles, x = coordGrid.x, z = coordGrid.z, level = coordGrid.level, facing = effectiveFacing }
 end
 
+
+-- Subscribe the doTick function to run on server logic event (every tick)
 Event.ServerLogic.Subscribe("updateCollision", doTick)
+
 
 -- Creates an event that runs every frame for drawing valid Dive tiles.
 Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
+    -- Get self
     local self = PlayerList.Self()
     if self == nil then
         diveDirection.clear()
         return
     end
     if reach.x == nil then return end
+
+    -- unpack necessary player renders from data structure
     local playerTileX, playerTileZ, plane, effectiveFacing = reach.x, reach.z, reach.level, reach.facing
 
 
+    -- diveUtils.traceStraightLine draws a straight line given a dynamic range 
+    -- (Surge range being 10 tiles, Escape range depending on weapon attack range)
+    -- This block of code takes the player facing direction, and calculates the surge and
+    -- escape tiles (forward and backward).
+    -- If hidebehind mode is on, tiles behind the player aren't drawn.
     local forward, backward = {}, {}
     local facingX, facingZ
     if type(effectiveFacing) == "number" then
@@ -138,25 +168,38 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
         end
     end
 
+    -- Grab the dive tile render mode from plugin settings
     local mode = uiUtils.settings.diveMode
+    -- edgesMode renders only the outer edges of the tile and no fill
     local edgesMode = mode == "edges"
 
+    -- local variables to capture the outer perimeter of diveable tiles
     local perimeter, exterior
 
+    -- If the render mode is perimeter or outer edge only apply floodFill
+    -- to calculate only the outermost set of diveable tiles.
+    -- Perimeter holds the tiles, exterior holds the outer edges
     if mode == "perimeter" or edgesMode then
         perimeter, exterior = uiUtils.outerPerimeter(reachable)
     end
 
     -- Hover tile: the Dive destination under the cursor while the Dive cursor is active.
+    -- This block of code calculates the angle and tile to fill when in "Hover mode".
+    -- "Hover mode" highlights the tile your cursor is on, and shows you the direction 
+    -- your character will be facing if you dive there.
+
+    -- We populate hoverPath with the set of tiles to be highlighted (Just the hovered tile or max distance tile)
+    -- We populate hoverOx and hoverOz with the player position if they dove to the hovered tile.
     local hoverPath = {}
     local hoverOX, hoverOZ
     if isDiveCursor and not MiniMenu.IsOpen() then
         -- Get mouse hover direction
+        -- getHoveredDivePosition() returns an angle when the player's cursor is out of the
+        -- 21x21 dive range. Else, it returns a specific dive tile coord.
         local diveResult = uiUtils.getHoveredDivePosition(
             playerTileX, playerTileZ
         )
-        -- if an angle was returned, find the furthest tile in that
-        -- direction
+        -- if an angle was returned, find the furthest reachable tile in that direction
         if diveResult.angle then
             -- turn our angle into tile offsets
             local dx, dz = diveUtils.compassVector(diveResult.angle)
@@ -171,6 +214,7 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
                 end
             end
         else
+            -- If a tile was returned, the player is hovering within the 21x21 dive radius
             if diveResult.tile then
                 -- translate player coordinates back to offset coordinates
                 local ox, oz = diveResult.tile.x - playerTileX, diveResult.tile.z - playerTileZ
@@ -208,14 +252,24 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
         for oz = -RADIUS, RADIUS do
             local tx, tz = playerTileX + ox, playerTileZ + oz
             local key = tx .. "," .. tz
+            -- Flag for whether to draw hover tile
             local hoverVisible = uiUtils.settings.showHover
                 and reachable[ox .. "," .. oz] and hoverPath[ox .. "," .. oz]
+            -- Flag for whether to draw dive tiles
             local diveVisible = reachable[ox .. "," .. oz]
                 and (
                     mode == "all"
                     or (mode == "perimeter"
                         and perimeter ~= nil
                         and perimeter[ox .. "," .. oz])
+                )
+            -- Flag for whether to draw arrows
+            -- Arrows can render on perimeter tiles even in edges-only mode.
+            local diveArrowVisible = diveVisible
+                or (
+                    edgesMode
+                    and perimeter ~= nil
+                    and perimeter[ox .. "," .. oz]
                 )
 
             -- Render hover tile
@@ -235,7 +289,7 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
                 uiUtils.drawTile(tx, tz, plane, uiUtils.diveRGBA)
             end
             -- render directional arrows
-            if uiUtils.settings.showArrows and (diveVisible or hoverVisible) then
+            if uiUtils.settings.showArrows and (diveArrowVisible or hoverVisible) then
                 local angle = diveDirection.directionForOffset(ox, oz)
                 if angle ~= nil then uiUtils.drawDirectionArrow(tx, tz, plane, angle) end
             end
@@ -258,6 +312,7 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
     end
 end)
 
+-- Create event hookds for RegionCreated and Region Updated
 -- If a new region is created or deleted trigger a re-detection of procedurally generated areas.
 local regionCreatedSubscribed = false
 local regionUpdatedSubscribed = false
@@ -277,6 +332,7 @@ if Event.RegionUpdated and Event.RegionUpdated.Subscribe then
 end
 
 -- Shutdown function
+-- Unsubscribe from all created events, and save user UI settings to PersistentDB
 function PluginShutdown()
     uiUtils.saveSettings()
 
