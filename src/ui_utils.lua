@@ -156,7 +156,7 @@ function M.openSettings()
     -- creates the prettyUI window
     local parent = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA)
     uiWindow = prettyui.Window.new(parent, {
-        title = "Dive / Surge / Escape",
+        title = "Dive Overlay Settings",
         x = 800,
         y = 200,
         width = 330,
@@ -542,19 +542,5 @@ function M.getHoveredDivePosition(playerX, playerZ)
     local angle = math.deg(math.atan(dx, dz)) % 360
     return { angle = math.floor(angle / 45 + 0.5) * 45 % 360 }
 end
-
-print(string.format(
-    "[Dive Defaults] diveColour=0x%08X, hoverColour=0x%08X, surgeColour=0x%08X, escapeColour=0x%08X",
-    M.settings.diveColour,
-    M.settings.hoverColour,
-    M.settings.surgeColour,
-    M.settings.escapeColour
-))
-
-print(string.format(
-    "[Dive Defaults] edgeOpacity=%s, fillOpacity=%s",
-    tostring(M.settings.edgeOpacity),
-    tostring(M.settings.fillOpacity)
-))
 
 return M
