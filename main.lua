@@ -138,7 +138,14 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
         end
     end
 
-    local perimeter = uiUtils.settings.diveMode == "perimeter" and uiUtils.outerPerimeter(reachable) or nil
+    local mode = uiUtils.settings.diveMode
+    local edgesMode = mode == "edges"
+
+    local perimeter, exterior
+
+    if mode == "perimeter" or edgesMode then
+        perimeter, exterior = uiUtils.outerPerimeter(reachable)
+    end
 
     -- Hover tile: the Dive destination under the cursor while the Dive cursor is active.
     local hoverPath = {}
@@ -169,23 +176,6 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
                 local ox, oz = diveResult.tile.x - playerTileX, diveResult.tile.z - playerTileZ
                 hoverPath[ox .. "," .. oz] = true
                 hoverOX, hoverOZ = ox, oz
-            end
-        end
-    end
-
-    -- Expand the resolved Hover Tile into a square of reachable Dive tiles.
-    if hoverOX ~= nil and hoverOZ ~= nil
-        and reachable[hoverOX .. "," .. hoverOZ] then
-
-        local hover_radius = uiUtils.settings.hoverRadius
-
-        for key in pairs(reachable) do
-            local ox, oz = key:match("^(-?%d+),(-?%d+)$")
-            ox, oz = tonumber(ox), tonumber(oz)
-
-            if math.abs(ox - hoverOX) <= hover_radius
-                and math.abs(oz - hoverOZ) <= hover_radius then
-                hoverPath[key] = true
             end
         end
     end
@@ -222,23 +212,38 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
                 and reachable[ox .. "," .. oz] and hoverPath[ox .. "," .. oz]
             local diveVisible = reachable[ox .. "," .. oz]
                 and (
-                    uiUtils.settings.diveMode == "all" or
-                    (perimeter ~= nil and perimeter[ox .. "," .. oz])
+                    mode == "all"
+                    or (mode == "perimeter"
+                        and perimeter ~= nil
+                        and perimeter[ox .. "," .. oz])
                 )
+
+            -- Render hover tile
             if hoverVisible then
                 uiUtils.drawTile(tx, tz, plane, uiUtils.hoverRGBA)
+            -- render Surge
             elseif surgePreview[key] then
                 uiUtils.drawTile(tx, tz, plane, uiUtils.surgeRGBA)
+            -- render Surge preview
             elseif showPlayerSurgePreview and forward[key] then
                 uiUtils.drawTile(tx, tz, plane, uiUtils.surgeRGBA)
+            -- render Escape
             elseif uiUtils.settings.showEscape and backward[key] then
                 uiUtils.drawTile(tx, tz, plane, uiUtils.escapeRGBA)
+            -- render dive tiles
             elseif diveVisible then
                 uiUtils.drawTile(tx, tz, plane, uiUtils.diveRGBA)
             end
+            -- render directional arrows
             if uiUtils.settings.showArrows and (diveVisible or hoverVisible) then
                 local angle = diveDirection.directionForOffset(ox, oz)
                 if angle ~= nil then uiUtils.drawDirectionArrow(tx, tz, plane, angle) end
+            end
+            -- Draw only the edges bordering the exterior flood-fill region.
+            if edgesMode and perimeter[ox .. "," .. oz] then
+                uiUtils.drawPerimeterEdges(
+                    tx, tz, plane, ox, oz, exterior
+                )
             end
         end
     end
