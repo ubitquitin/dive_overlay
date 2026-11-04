@@ -140,6 +140,7 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
     local self = PlayerList.Self()
     if self == nil then
         diveDirection.clear()
+        activeTiles.hideAll()
         return
     end
     if reach.x == nil then return end
@@ -238,31 +239,34 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
         local diveArrowVisible = diveVisible
             or (edgesMode and tile.perimeterEdges ~= nil)
 
-        local tx, tz = tile.coord.x, tile.coord.z
+        local colour
+        local shape = uiUtils.TILE_FULL
         if hoverVisible then
             -- Render hover tile
-            uiUtils.drawTile(tx, tz, plane, uiUtils.hoverRGBA)
+            colour = uiUtils.settings.hoverColour
         elseif surgePreview[tile] then
             -- render Surge
-            uiUtils.drawTile(tx, tz, plane, uiUtils.surgeRGBA)
+            colour = uiUtils.settings.surgeColour
         elseif showPlayerSurgePreview and forward[tile] then
             -- render Surge preview
-            uiUtils.drawTile(tx, tz, plane, uiUtils.surgeRGBA)
+            colour = uiUtils.settings.surgeColour
         elseif uiUtils.settings.showEscape and backward[tile] then
             -- render Escape
-            uiUtils.drawTile(tx, tz, plane, uiUtils.escapeRGBA)
+            colour = uiUtils.settings.escapeColour
         elseif diveVisible then
             -- render dive tiles
-            uiUtils.drawTile(tx, tz, plane, uiUtils.diveRGBA)
+            colour = uiUtils.settings.diveColour
         elseif edgesMode and tile.perimeterEdges ~= nil then
             -- render only the edges bordering the exterior flood-fill region
-            uiUtils.drawPerimeterEdges(tx, tz, plane, tile.perimeterEdges)
+            colour = uiUtils.settings.diveColour
+            shape = tile.perimeterEdges
         end
 
+        uiUtils.setTile(tile, colour, shape)
+
         -- render directional arrows
-        if uiUtils.settings.showArrows and (diveArrowVisible or hoverVisible) and tile.facing ~= nil then
-            uiUtils.drawDirectionArrow(tx, tz, plane, tile.facing)
-        end
+        uiUtils.setTileArrow(tile,
+            uiUtils.settings.showArrows and (diveArrowVisible or hoverVisible))
     end
 
     -- draw surge preview outside of radius

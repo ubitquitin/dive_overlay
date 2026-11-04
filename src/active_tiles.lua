@@ -7,13 +7,16 @@
 --
 -- Record fields:
 --   coord, key           CoordGrid and its packed value (set once)
+--   corners              ground geometry, filled in by ui_utils when first drawn
 --   ox, oz, facing       offset from the player and the facing after Diving
 --                        there (updated on sync)
 --   isDiveable           whether Dive can reach the tile (per tick)
 --   isBehind             hidden by Hide Behind (per tick / setting change)
 --   perimeterEdges       edge mask if on the outer perimeter, else nil
+--   instance, arrow      ShapeInstances and their applied state (ui_utils)
 local diveDirection = require("src/dive_direction")
 local diveUtils = require("src/dive_utils")
+local uiUtils = require("src/ui_utils")
 
 local M = {}
 local RADIUS = 10
@@ -29,8 +32,9 @@ local function newRecord(x, z, level)
 end
 
 -- Re-centres the active set on the given CoordGrid. Tiles still in range
--- keep their records, tiles that left range are dropped, and tiles that
--- entered range get new records.
+-- keep their records and instances, tiles that left range are dropped and
+-- their instances returned to the pool, and tiles that entered range get
+-- new records.
 -- Only does work when the centre changes.
 function M.sync(coordGrid)
     local x, z, level = coordGrid.x, coordGrid.z, coordGrid.level
@@ -46,6 +50,7 @@ function M.sync(coordGrid)
             local tile = newRecord(x + ox, z + oz, level)
             local existing = old[tile.key]
             if existing then
+                old[tile.key] = nil
                 tile = existing
             end
             tile.ox, tile.oz = ox, oz
@@ -53,6 +58,10 @@ function M.sync(coordGrid)
             tiles[tile.key] = tile
             column[oz] = tile
         end
+    end
+
+    for _, tile in pairs(old) do
+        uiUtils.releaseTile(tile)
     end
 
     M.tiles, M.byOffset = tiles, byOffset
@@ -183,6 +192,13 @@ function M.applyPerimeter()
             if exterior[ox - 1][oz] then mask = mask | 8 end -- West
             if mask ~= 0 then tile.perimeterEdges = mask end
         end
+    end
+end
+
+-- Hides every tile.
+function M.hideAll()
+    for _, tile in pairs(M.tiles) do
+        uiUtils.hideTile(tile)
     end
 end
 

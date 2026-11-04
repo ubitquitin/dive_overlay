@@ -304,7 +304,7 @@ local tris = { 4, 5, 6, 4, 6, 7 }
 -- Retrieves the terrain height at a specific world position and plane.
 -- Based on https://github.com/PrettyRS/tilemarkers/blob/main/src/draw.lua
 --
--- Used by tileCorners() and drawDirectionArrow() to position overlay
+-- Used by tileCorners() and createArrowInstance() to position overlay
 -- graphics above the actual ground instead of using the player's height.
 -- Returns nil if the terrain height is unavailable or the API fails.
 local function groundHeight(plane, worldX, worldZ)
@@ -379,96 +379,208 @@ function M.drawTile(x, z, plane, colors)
     }
 end
 
--- Draw only the tile edges in edgeMask (S=1, E=2, N=4, W=8), as set in
--- perimeterEdges by active_tiles.applyPerimeter.
-function M.drawPerimeterEdges(x, z, plane, edgeMask)
-    -- tileCorners returns SW, SE, NE, NW as its first four vertices.
-    local corners = tileCorners(x, z, plane)
-    if not corners then return end
+-- TILE INSTANCES
+-- Rendering for active tile records (see active_tiles.lua). Each record
+-- gets an instance the first time it is shown, kept until active_tiles
+-- drops the record. Its shape data is white with the edge and fill
+-- opacity as vertex alpha; instance.colour supplies the colour.
+--
+-- Instances released by dropped records go back to a pool and are reused
+-- for tiles entering range. This keeps the number of instances the plugin
+-- creates bounded, which keeps the client's cleanup on unload fast.
+local tilePool, arrowPool = {}, {}
+local instanceCount = 0
 
-    local edgeLines = {}
-
-    -- South: SW -> SE
-    if edgeMask & 1 ~= 0 then
-        edgeLines[#edgeLines + 1] = 0
-        edgeLines[#edgeLines + 1] = 1
+-- Takes a hidden instance from the pool, or creates a new one.
+local function takeInstance(pool, prefix)
+    while #pool > 0 do
+        local instance = table.remove(pool)
+        if instance.isValid then return instance end
     end
 
-    -- East: SE -> NE
-    if edgeMask & 2 ~= 0 then
-        edgeLines[#edgeLines + 1] = 1
-        edgeLines[#edgeLines + 1] = 2
-    end
-
-    -- North: NE -> NW
-    if edgeMask & 4 ~= 0 then
-        edgeLines[#edgeLines + 1] = 2
-        edgeLines[#edgeLines + 1] = 3
-    end
-
-    -- West: NW -> SW
-    if edgeMask & 8 ~= 0 then
-        edgeLines[#edgeLines + 1] = 3
-        edgeLines[#edgeLines + 1] = 0
-    end
-
-    if #edgeLines == 0 then return end
-
-    ShapeList.Draw {
-        shapePositions = {
-            corners[1], corners[2], corners[3], corners[4]
-        },
-        shapeRGBA = {
-            M.diveRGBA[1], M.diveRGBA[2],
-            M.diveRGBA[3], M.diveRGBA[4]
-        },
-        shapeLines = edgeLines,
-        translation = Vector3.new(
-            x * TILE_SIZE + TILE_SIZE / 2,
-            0,
-            z * TILE_SIZE + TILE_SIZE / 2
-        ),
-        ignoreDepth = true,
-        lineWidth = 3,
-    }
+    instanceCount = instanceCount + 1
+    local name = prefix .. instanceCount
+    local instance = ShapeList.CreateInstance(name) or ShapeList.GetInstance(name)
+    if not instance then return nil end
+    instance.ignoreDepth = true
+    instance.lineWidth = 3
+    instance.visible = false
+    return instance
 end
 
--- Draws an arrow showing the direction the player would face after
--- Diving to a particular tile.
---
--- main.lua uses dive_direction.directionForOffset() to determine the
--- expected facing angle for each Dive destination, then passes that
--- angle to this function when "Dive facing arrows" is enabled.
---
--- The angle is converted into a forward direction (fx, fz) and a
--- perpendicular sideways direction (rx, rz). These vectors are used
--- to construct the arrow's shaft and two arrowhead wings.
---
--- The arrow is positioned above the terrain at the tile's center.
-function M.drawDirectionArrow(x, z, plane, angle)
-    local centreX = x * TILE_SIZE + TILE_SIZE / 2
-    local centreZ = z * TILE_SIZE + TILE_SIZE / 2
-    local y = groundHeight(plane, centreX, centreZ)
-    if not y then return end
-    local radians = math.rad(angle)
-    local fx, fz = math.sin(radians), math.cos(radians)
-    local rx, rz = fz, -fx
+-- Hides an instance and returns it to the pool. Invalid instances are dropped.
+local function releaseInstance(pool, instance)
+    if instance and instance.isValid then
+        instance.visible = false
+        pool[#pool + 1] = instance
+    end
+end
+
+-- Tile shapes are a bitmask of outline edges plus the fill.
+-- Edge bits follow the outline vertex order: S (SW->SE), E, N, W.
+local EDGE_LINES = { { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 } }
+local TILE_FILL = 16
+M.TILE_FULL = 15 | TILE_FILL
+
+-- Builds a tile's shape data from its tileCorners: the outline edges in
+-- the shape's mask, plus the fill triangles if it has the fill bit. Vertex
+-- colours are white with the edge or fill opacity as alpha, which
+-- instance.colour is multiplied against.
+local function tileShapeData(corners, shape, edgeOpacity, fillOpacity)
+    local edge = 0xFFFFFF00 | math.floor(255 * edgeOpacity / 100 + 0.5)
+    local fill = 0xFFFFFF00 | math.floor(255 * fillOpacity / 100 + 0.5)
+
+    local shapeLines = {}
+    for i, line in ipairs(EDGE_LINES) do
+        if shape & (1 << (i - 1)) ~= 0 then
+            shapeLines[#shapeLines + 1] = line[1]
+            shapeLines[#shapeLines + 1] = line[2]
+        end
+    end
+
+    local data = ShapeData.new()
+    data.positions = corners
+    data.rgba = { edge, edge, edge, edge, fill, fill, fill, fill }
+    data.lines = shapeLines
+    data.tris = (shape & TILE_FILL ~= 0) and tris or {}
+    return data
+end
+
+-- Gives the tile an instance from the pool, placed at the tile. Its shape
+-- data is set in setTile, since the tile's shape starts unset. Returns
+-- false if the ground height isn't available yet, so the caller can retry
+-- on a later frame.
+local function createTileInstance(tile)
+    local coord = tile.coord
+    tile.corners = tile.corners or tileCorners(coord.x, coord.z, coord.level)
+    if not tile.corners then return false end
+
+    local instance = takeInstance(tilePool, "diveTile:")
+    if not instance then return false end
+
+    instance.translation = Vector3.new(coord.x * TILE_SIZE + TILE_SIZE / 2, 0, coord.z * TILE_SIZE + TILE_SIZE / 2)
+    tile.instance = instance
+    return true
+end
+
+-- Shows the instance in the given colour, or hides it when colour is nil.
+-- Returns the colour so the tile can remember what was applied.
+local function applyColour(instance, current, colour)
+    if current == colour then return current end
+    instance.visible = colour ~= nil
+    if colour ~= nil then instance.colour = colour end
+    return colour
+end
+
+-- Dive facing arrow pointing north (compass 0). Each arrow instance is
+-- rotated to the direction the player would face after Diving to its tile.
+local arrowData
+local function arrowShapeData()
+    if arrowData then return arrowData end
     local len, wing = 165, 85
-    local arrowPoints = {
-        Vector3.new(-fx * len * 0.38, 0, -fz * len * 0.38),
-        Vector3.new(fx * len * 0.62, 0, fz * len * 0.62),
-        Vector3.new(fx * len * 0.18 + rx * wing, 0, fz * len * 0.18 + rz * wing),
-        Vector3.new(fx * len * 0.62, 0, fz * len * 0.62),
-        Vector3.new(fx * len * 0.18 - rx * wing, 0, fz * len * 0.18 - rz * wing),
+    arrowData = ShapeData.new()
+    arrowData.positions = {
+        Vector3.new(0, 0, -len * 0.38),
+        Vector3.new(0, 0, len * 0.62),
+        Vector3.new(wing, 0, len * 0.18),
+        Vector3.new(0, 0, len * 0.62),
+        Vector3.new(-wing, 0, len * 0.18),
     }
-    ShapeList.Draw {
-        shapePositions = arrowPoints,
-        shapeRGBA = { 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF },
-        shapeLines = { 0, 1, 2, 3, 3, 4 },
-        translation = Vector3.new(x * TILE_SIZE + TILE_SIZE / 2, y + 125, z * TILE_SIZE + TILE_SIZE / 2),
-        ignoreDepth = true,
-        lineWidth = 3,
-    }
+    arrowData.rgba = { 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF }
+    arrowData.lines = { 0, 1, 2, 3, 3, 4 }
+    return arrowData
+end
+
+-- Converts compass degrees into the instance's yaw rotation.
+local function arrowRotation(angle)
+    return Vector3.new(angle, 0, 0)
+end
+
+-- The arrow sits above the terrain at the tile's centre.
+local function createArrowInstance(tile)
+    local coord = tile.coord
+    local centreX = coord.x * TILE_SIZE + TILE_SIZE / 2
+    local centreZ = coord.z * TILE_SIZE + TILE_SIZE / 2
+    local y = groundHeight(coord.level, centreX, centreZ)
+    if not y then return nil end
+
+    -- Pooled arrows already have the arrow shape; new ones need it set once.
+    local instance = takeInstance(arrowPool, "diveArrow:")
+    if not instance then return nil end
+    if not instance.hasData and not instance:SetShapeData(arrowShapeData()) then
+        releaseInstance(arrowPool, instance)
+        return nil
+    end
+
+    instance.translation = Vector3.new(centreX, y + 125, centreZ)
+    return instance
+end
+
+-- Returns the tile's instances to the pool. Called when active_tiles drops
+-- the record.
+function M.releaseTile(tile)
+    releaseInstance(tilePool, tile.instance)
+    releaseInstance(arrowPool, tile.arrow)
+    tile.instance, tile.arrow = nil, nil
+end
+
+-- Hides the tile and its arrow.
+function M.hideTile(tile)
+    M.setTile(tile, nil)
+    M.setTileArrow(tile, false)
+end
+
+-- Shows the tile in the given RRGGBBAA picker colour and shape (M.TILE_FULL
+-- or an edge mask from tile.perimeterEdges), or hides it when colour is nil.
+-- The shape data is rebuilt when the shape or the edge or fill opacity
+-- setting differs from what it was built with; the instance is otherwise
+-- only touched when its colour changes.
+function M.setTile(tile, colour, shape)
+    -- The client can invalidate instances on its own; take a new one if so.
+    if tile.instance and not tile.instance.isValid then
+        tile.instance, tile.colour, tile.shape = nil, nil, nil
+    end
+
+    if not tile.instance then
+        if colour == nil or not createTileInstance(tile) then return end
+    end
+
+    local edgeOpacity, fillOpacity = M.settings.edgeOpacity, M.settings.fillOpacity
+    if colour ~= nil and (tile.shape ~= shape
+            or tile.edgeOpacity ~= edgeOpacity or tile.fillOpacity ~= fillOpacity) then
+        local data = tileShapeData(tile.corners, shape, edgeOpacity, fillOpacity)
+        if not tile.instance:SetShapeData(data) then return end
+        tile.shape, tile.edgeOpacity, tile.fillOpacity = shape, edgeOpacity, fillOpacity
+    end
+
+    tile.colour = applyColour(tile.instance, tile.colour, colour)
+end
+
+-- Shows or hides the tile's Dive facing arrow, pointed along tile.facing.
+-- The arrow is created the first time it is shown and stays hidden when
+-- the tile has no facing.
+function M.setTileArrow(tile, show)
+    -- The client can invalidate instances on its own; recreate it if so.
+    if tile.arrow and not tile.arrow.isValid then
+        tile.arrow, tile.arrowAngle, tile.arrowVisible = nil, nil, nil
+    end
+
+    if not show and not tile.arrow then return end
+
+    if not tile.arrow then
+        tile.arrow = createArrowInstance(tile)
+        if not tile.arrow then return end
+    end
+
+    if tile.arrowAngle ~= tile.facing then
+        tile.arrowAngle = tile.facing
+        if tile.facing ~= nil then tile.arrow.rotation = arrowRotation(tile.facing) end
+    end
+
+    show = show and tile.facing ~= nil or false
+    if tile.arrowVisible == show then return end
+    tile.arrowVisible = show
+    tile.arrow.visible = show
 end
 
 -- DONT LOOK BACK MODE UTILITY
@@ -490,7 +602,6 @@ function M.isTileInFront(tile, facing)
     local facingX, facingZ = diveUtils.compassVector(facing)
     return tile.ox * facingX + tile.oz * facingZ >= 0
 end
-
 
 -- dive seems to have 2 distinct modes:
 -- 1. if within 10 tiles, it goes towards a tile directly
