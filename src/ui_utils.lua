@@ -16,10 +16,12 @@ local DEFAULT_SETTINGS = {
     hideBehind = false,
     showHover = true,
     surgeFollowsHover = false,
-    diveColour = 0xC8A000FF,
-    hoverColour = 0xC8A000FF,
+    diveColour = 0xEBC946FF,
+    hoverColour = 0xD70E34FF,
     surgeColour = 0x1266DFFF,
     escapeColour = 0x008000FF,
+    edgeOpacity = 29, -- Edge alpha as a percentage of the color picker's alpha
+    fillOpacity = 6, -- Fill alpha as a percentage of the color picker's alpha
 }
 
 local function loadSettings()
@@ -46,9 +48,13 @@ local function loadSettings()
     -- Validate the selected mode.
     if settings.diveMode ~= "all"
         and settings.diveMode ~= "perimeter"
+        and settings.diveMode ~= "edges"
         and settings.diveMode ~= "none" then
         settings.diveMode = "all"
     end
+
+    settings.edgeOpacity = math.max(0, math.min(100, settings.edgeOpacity))
+    settings.fillOpacity = math.max(0, math.min(100, settings.fillOpacity))
 
     return settings
 end
@@ -81,16 +87,46 @@ local function colours(colour)
     -- Picker uses RRGGBBAA. Keep solid outlines and translucent fills.
     local rgb = colour & 0xFFFFFF00
     local alpha = colour & 0xFF
-    local fillAlpha = math.floor(alpha * 0.27)
-    return {rgb | alpha,rgb | alpha,rgb | alpha,rgb | alpha,
-            rgb | fillAlpha,rgb | fillAlpha,rgb | fillAlpha,rgb | fillAlpha}
+
+    local edgeAlpha = math.floor(
+        alpha * M.settings.edgeOpacity / 100 + 0.5
+    )
+    local fillAlpha = math.floor(
+        alpha * M.settings.fillOpacity / 100 + 0.5
+    )
+
+    local edge = rgb | edgeAlpha
+    local fill = rgb | fillAlpha
+
+    return {
+        edge, edge, edge, edge,
+        fill, fill, fill, fill
+    }
 end
 
-M.diveRGBA = colours(M.settings.diveColour)
-M.hoverRGBA = colours(M.settings.hoverColour)
-M.surgeRGBA = colours(M.settings.surgeColour)
-M.escapeRGBA = colours(M.settings.escapeColour)
+-- Rebuild all overlay colours after opacity changes.
+function M.refreshColours()
+    M.diveRGBA = colours(M.settings.diveColour)
+    M.hoverRGBA = colours(M.settings.hoverColour)
+    M.surgeRGBA = colours(M.settings.surgeColour)
+    M.escapeRGBA = colours(M.settings.escapeColour)
+end
 
+M.refreshColours()
+
+-- Update opacity immediately and persist the selection.
+function M.setOpacity(key, value)
+    if key ~= "edgeOpacity" and key ~= "fillOpacity" then
+        return
+    end
+
+    if type(value) ~= "number" then return end
+
+    M.settings[key] = math.max(0, math.min(100, value))
+
+    M.refreshColours()
+    M.saveSettings()
+end
 
 -- Updates a tile colour and its corresponding drawing vertex colours.
 -- Saves the color choice into the settings persistentDB
@@ -117,7 +153,7 @@ function M.openSettings()
     -- creates the prettyUI window
     local parent = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__GAME_AREA)
     uiWindow = prettyui.Window.new(parent, {
-        title = "Dive / Surge / Escape",
+        title = "Dive Overlay Settings",
         x = 800,
         y = 200,
         width = 330,
@@ -130,9 +166,10 @@ function M.openSettings()
     -- Adds the section for Dive Tile Mode
     uiWindow:AddTitle("Dive tiles")
     uiWindow:AddRadioButton({
-        { text = "All diveable tiles",   value = "all" },
-        { text = "Outer perimeter only", value = "perimeter" },
-        { text = "None",                 value = "none" },
+        { text = "All diveable tiles",    value = "all" },
+        { text = "Outer perimeter only",  value = "perimeter" },
+        { text = "Perimeter edges only",  value = "edges" },
+        { text = "None",                  value = "none" },
     }, {
         selectedValue = M.settings.diveMode,
         onChange = function(_, value)
@@ -149,6 +186,7 @@ function M.openSettings()
             M.saveSettings()
         end,
     })
+
     -- Adds the section for Overlay tile options
     uiWindow:AddTitle("Overlays")
     uiWindow:AddCheckboxButton({
@@ -176,6 +214,30 @@ function M.openSettings()
             M.saveSettings()
         end,
     })
+    uiWindow:AddTitle("Tile opacity")
+
+    uiWindow:AddText("Edge opacity (%)")
+    uiWindow:AddSlider({
+        min = 0,
+        max = 100,
+        step = 1,
+        value = M.settings.edgeOpacity,
+        onChange = function(_, value)
+            M.setOpacity("edgeOpacity", value)
+        end,
+    })
+
+    uiWindow:AddText("Fill opacity (%)")
+    uiWindow:AddSlider({
+        min = 0,
+        max = 100,
+        step = 1,
+        value = M.settings.fillOpacity,
+        onChange = function(_, value)
+            M.setOpacity("fillOpacity", value)
+        end,
+    })
+
     -- Adds the section for tile color pickers
     uiWindow:AddTitle("Tile colours")
     uiWindow:AddText("Dive")
@@ -317,6 +379,64 @@ function M.drawTile(x, z, plane, colors)
 end
 
 
+-- Draw only tile edges touching the exterior flood-filled region.
+-- Does not draw fills, internal edges, or edges around enclosed holes.
+function M.drawPerimeterEdges(x, z, plane, ox, oz, exterior)
+    local function key(dx, dz)
+        return dx .. "," .. dz
+    end
+
+    -- tileCorners returns SW, SE, NE, NW as its first four vertices.
+    local corners = tileCorners(x, z, plane)
+    if not corners then return end
+
+    local edgeLines = {}
+
+    -- South: SW -> SE
+    if exterior[key(ox, oz - 1)] then
+        edgeLines[#edgeLines + 1] = 0
+        edgeLines[#edgeLines + 1] = 1
+    end
+
+    -- East: SE -> NE
+    if exterior[key(ox + 1, oz)] then
+        edgeLines[#edgeLines + 1] = 1
+        edgeLines[#edgeLines + 1] = 2
+    end
+
+    -- North: NE -> NW
+    if exterior[key(ox, oz + 1)] then
+        edgeLines[#edgeLines + 1] = 2
+        edgeLines[#edgeLines + 1] = 3
+    end
+
+    -- West: NW -> SW
+    if exterior[key(ox - 1, oz)] then
+        edgeLines[#edgeLines + 1] = 3
+        edgeLines[#edgeLines + 1] = 0
+    end
+
+    if #edgeLines == 0 then return end
+
+    ShapeList.Draw{
+        shapePositions = {
+            corners[1], corners[2], corners[3], corners[4]
+        },
+        shapeRGBA = {
+            M.diveRGBA[1], M.diveRGBA[2],
+            M.diveRGBA[3], M.diveRGBA[4]
+        },
+        shapeLines = edgeLines,
+        translation = Vector3.new(
+            x * TILE_SIZE + TILE_SIZE / 2,
+            0,
+            z * TILE_SIZE + TILE_SIZE / 2
+        ),
+        ignoreDepth = true,
+        lineWidth = 3,
+    }
+end
+
 -- Draws an arrow showing the direction the player would face after
 -- Diving to a particular tile.
 --
@@ -442,7 +562,7 @@ function M.outerPerimeter(reachable)
             ) then border[k] = true end
         end
     end
-    return border
+    return border, exterior
 end
 
 -- dive seems to have 2 distinct modes:

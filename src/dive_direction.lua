@@ -1,5 +1,5 @@
 -- Dive direction tracking.
--- Called once per Draw frame by main.lua.
+-- Called once per tick by main.lua.
 -- Public API:
 --   update(tileX, tileZ, plane, gameFacing, cooldowns) -> compass degrees or nil
 --   directionForOffset(dx, dz) -> compass degrees or nil
@@ -14,7 +14,7 @@
 -- recognized so their movement does not get mistaken for ordinary walking.
 --
 -- The cooldown values passed by main.lua correspond to:
---   diveEnd = 6961, surge = 8670, escape = 8666.
+--   diveEnd = 6961, surge = 8670, escape = 983.
 --
 -- Timing below is measured in game ticks.
 
@@ -22,9 +22,11 @@ local M = {}
 
 -- Translate the game's facing convention into compass degrees.
 local FACING_OFFSET_DEGREES = 180
+-- Number of tiles for a movement to be considered "long"
+-- If a dive is long enough, the cooldown playervar updates one tick later.
 local LONG_MOVE_DISTANCE = 9
 
-
+-- Compass degree directions
 local N, NE, E, SE, S, SW, W, NW, X =
     0, 45, 90, 135, 180, 225, 270, 315, false
 
