@@ -86,31 +86,17 @@ end
 -- dx, dz: Direction vector from compassVector(), each component -1, 0, or 1.
 -- maxRange: Maximum number of tiles to examine in the given direction.
 --
--- First, find the furthest destination that passes isDiveable().
--- Then, collect all valid destinations up to that distance.
---
--- IMPORTANT: This does not require every intermediate destination to be
--- reachable. A failed destination does not stop the search, because a
--- farther destination may still pass the Dive path simulation.
+-- Every destination is checked on its own with isDiveable(). A failed
+-- destination does not stop the search, because a farther destination may
+-- still pass the Dive path simulation.
 --
 -- Returns a set of the active tile records on the line (record -> true),
 -- and a list of { x = tx, z = tz } world coordinates for destinations
 -- outside the active range, so they can still be drawn.
 function M.traceLine(startX, startZ, dx, dz, maxRange)
-    local onLine, outside, furthest = {}, {}, 0
+    local onLine, outside = {}, {}
 
-    -- Pass 1: Find the furthest valid destination within the maximum range.
     for distance = 1, maxRange do
-        local tx, tz = startX + dx * distance, startZ + dz * distance
-
-        if diveUtils.isDiveable(startX, startZ, tx, tz, centreLevel) then
-            furthest = distance
-        end
-    end
-
-    -- Pass 2: Mark all individually reachable destinations up to that distance.
-    -- Tiles that fail isDiveable() are skipped, even if they lie before furthest.
-    for distance = 1, furthest do
         local tx, tz = startX + dx * distance, startZ + dz * distance
 
         if diveUtils.isDiveable(startX, startZ, tx, tz, centreLevel) then

@@ -1,6 +1,7 @@
 -- User-facing settings, UI controls, tile rendering, and display filters.
 -- Movement and collision decisions deliberately live in other modules.
 
+local debouncer = require("src/debouncer")
 local diveUtils = require("src/dive_utils")
 
 local M = {}
@@ -76,6 +77,19 @@ function M.saveSettings()
     end
 
     PersistentDB:SetStructuredData(SETTINGS_KEY, saved)
+end
+
+-- Restores every setting to its default and persists the result.
+function M.resetSettings()
+    debouncer.cancel("edgeOpacity")
+    debouncer.cancel("fillOpacity")
+
+    for key, default in pairs(DEFAULT_SETTINGS) do
+        M.settings[key] = default
+    end
+
+    M.refreshColours()
+    M.saveSettings()
 end
 
 -- Helper function that takes the hex input from color pickers and
@@ -225,7 +239,9 @@ function M.openSettings()
         step = 1,
         value = M.settings.edgeOpacity,
         onChange = function(_, value)
-            M.setOpacity("edgeOpacity", value)
+            debouncer.debounce("edgeOpacity", 0.2, function()
+                M.setOpacity("edgeOpacity", value)
+            end)
         end,
     })
 
@@ -236,7 +252,9 @@ function M.openSettings()
         step = 1,
         value = M.settings.fillOpacity,
         onChange = function(_, value)
-            M.setOpacity("fillOpacity", value)
+            debouncer.debounce("fillOpacity", 0.2, function()
+                M.setOpacity("fillOpacity", value)
+            end)
         end,
     })
 

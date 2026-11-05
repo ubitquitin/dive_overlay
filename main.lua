@@ -20,6 +20,7 @@ local diveDirection = require("src/dive_direction")
 local diveUtils = require("src/dive_utils")
 local uiUtils = require("src/ui_utils")
 local activeTiles = require("src/active_tiles")
+local debouncer = require("src/debouncer")
 
 -- Utility function to read a player var safely: a missing var must not abort drawing.
 local function vp(id)
@@ -35,6 +36,9 @@ end
 Event.SettingsLayerReady.Subscribe("diveOverlaySettings", function(event)
     uiUtils.buildSettings(event.component)
 end)
+
+-- Runs debounced calls, such as settings changes from sliders.
+Event.Logic.Subscribe("diveOverlayDebounce", debouncer.onLogic)
 
 
 -- MiniMenu entries are ordered from lowest to highest priority.
@@ -297,9 +301,11 @@ end
 -- Shutdown function
 -- Unsubscribe from all created events, and save user UI settings to PersistentDB
 function PluginShutdown()
+    debouncer.flush()
     uiUtils.saveSettings()
 
     Event.SettingsLayerReady.Unsubscribe("diveOverlaySettings")
+    Event.Logic.Unsubscribe("diveOverlayDebounce")
     Event.Draw.Unsubscribe('bladedDiveTiles')
     Event.MiniMenuReady.Unsubscribe("diveCursorCheck")
     Event.ServerLogic.Unsubscribe("updateCollision")
