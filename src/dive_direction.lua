@@ -26,61 +26,20 @@ local FACING_OFFSET_DEGREES = 180
 -- If a dive is long enough, the cooldown playervar updates one tick later.
 local LONG_MOVE_DISTANCE = 9
 
--- Compass degree directions
-local N, NE, E, SE, S, SW, W, NW, X =
-    0, 45, 90, 135, 180, 225, 270, 315, false
-
--- Empirical Dive-facing lookup for every destination offset within +/-10 tiles.
--- Row 1 is dz=+10 (north), row 21 is dz=-10 (south).
--- Column 1 is dx=-10 (west), column 21 is dx=+10 (east).
--- The center cell represents no movement and deliberately contains false.
-local diveGrid = {
-    { NW, NW, NW, NW, NW, N,  N,  N,  N,  N,  N, N,  N,  N,  N,  NE, NE, NE, NE, NE, NE },
-    { NW, NW, NW, NW, NW, NW, N,  N,  N,  N,  N, N,  N,  N,  NE, NE, NE, NE, NE, NE, NE },
-    { NW, NW, NW, NW, NW, NW, NW, N,  N,  N,  N, N,  N,  NE, NE, NE, NE, NE, NE, NE, NE },
-    { NW, NW, NW, NW, NW, NW, NW, NW, N,  N,  N, N,  NE, NE, NE, NE, NE, NE, NE, NE, NE },
-    { NW, NW, NW, NW, NW, NW, NW, NW, NW, N,  N, N,  NE, NE, NE, NE, NE, NE, NE, NE, NE },
-    { NW, NW, NW, NW, NW, NW, NW, NW, NW, N,  N, N,  NE, NE, NE, NE, NE, NE, NE, NE, NE },
-    { W,  W,  NW, NW, NW, NW, NW, NW, NW, NW, N, NE, NE, NE, NE, NE, NE, NE, NE, E,  E },
-    { W,  W,  W,  NW, NW, NW, NW, NW, NW, NW, N, NE, NE, NE, NE, NE, NE, NE, E,  E,  E },
-    { W,  W,  W,  W,  W,  NW, NW, NW, NW, NW, N, NE, NE, NE, NE, NE, E,  E,  E,  E,  E },
-    { W,  W,  W,  W,  W,  W,  W,  W,  NW, NW, N, NE, NE, E,  E,  E,  E,  E,  E,  E,  E },
-    { W,  W,  W,  W,  W,  W,  W,  W,  W,  W,  X, E,  E,  E,  E,  E,  E,  E,  E,  E,  E },
-    { W,  W,  W,  W,  W,  W,  W,  W,  SW, SW, S, SE, SE, E,  E,  E,  E,  E,  E,  E,  E },
-    { W,  W,  W,  W,  W,  SW, SW, SW, SW, SW, S, SE, SE, SE, SE, SE, E,  E,  E,  E,  E },
-    { W,  W,  W,  SW, SW, SW, SW, SW, SW, SW, S, SE, SE, SE, SE, SE, SE, SE, E,  E,  E },
-    { W,  W,  SW, SW, SW, SW, SW, SW, SW, SW, S, SE, SE, SE, SE, SE, SE, SE, SE, E,  E },
-    { SW, SW, SW, SW, SW, SW, SW, SW, SW, S,  S, S,  SE, SE, SE, SE, SE, SE, SE, SE, SE },
-    { SW, SW, SW, SW, SW, SW, SW, SW, SW, S,  S, S,  SE, SE, SE, SE, SE, SE, SE, SE, SE },
-    { SW, SW, SW, SW, SW, SW, SW, SW, S,  S,  S, S,  S,  SE, SE, SE, SE, SE, SE, SE, SE },
-    { SW, SW, SW, SW, SW, SW, SW, S,  S,  S,  S, S,  S,  S,  SE, SE, SE, SE, SE, SE, SE },
-    { SW, SW, SW, SW, SW, SW, S,  S,  S,  S,  S, S,  S,  S,  S,  SE, SE, SE, SE, SE, SE },
-    { SW, SW, SW, SW, SW, S,  S,  S,  S,  S,  S, S,  S,  S,  S,  S,  SE, SE, SE, SE, SE }
-}
-
--- Look up the facing that Dive produces for a relative tile offset.
--- The lookup is only defined for integer offsets inside the 21x21 grid.
+-- The facing that Dive produces for a relative tile offset: the direction
+-- of the offset, rounded to the nearest of the 8 compass directions.
+-- Returns nil for no movement.
 function M.directionForOffset(dx, dz)
     if type(dx) ~= "number" or type(dz) ~= "number" then
         return nil
     end
 
-    if dx ~= math.floor(dx) or dz ~= math.floor(dz) then
-        return nil
-    end
-
-    -- Diving while running in the same direction can push the tick's offset
-    -- past the edge, where directions are broad enough that it rarely matters.
-    dx = math.max(-10, math.min(10, dx))
-    dz = math.max(-10, math.min(10, dz))
-
     if dx == 0 and dz == 0 then
         return nil
     end
 
-    -- Convert signed offsets to Lua's 1-based row/column indices.
-    local angle = diveGrid[11 - dz][11 + dx]
-    return type(angle) == "number" and angle or nil
+    local angle = math.deg(math.atan(dx, dz)) % 360
+    return math.floor(angle / 45 + 0.5) * 45 % 360
 end
 
 -- Apply Offset to the PlayerEntity.facing variable (I found this to be rotated 180 degrees?)
@@ -249,7 +208,7 @@ end
 -- Normal movement: use PlayerEntity.facing immediately, without waiting
 -- for the character to stop walking or running.
 --
--- Dive: calculate direction from the Dive start tile and the diveGrid.
+-- Dive: calculate direction from the Dive start tile with directionForOffset.
 -- Keep that result in diveOverride even after Dive tracking ends. This is
 -- needed because PlayerEntity.facing may still report the OLD direction.
 --

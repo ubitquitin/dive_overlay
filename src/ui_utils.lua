@@ -2,6 +2,7 @@
 -- Movement and collision decisions deliberately live in other modules.
 
 local debouncer = require("src/debouncer")
+local diveDirection = require("src/dive_direction")
 local diveUtils = require("src/dive_utils")
 
 local M = {}
@@ -298,8 +299,8 @@ function M.openSettings()
     })
 end
 
--- Builds the UI in the actual Jagex Plugin Settings UI.
--- Right now this is just a button that opens up the PrettyUI window when clicked
+-- Builds the UI in the actual Jagex Plugin Settings UI: a button that opens
+-- the PrettyUI window, and a button that resets all settings to defaults.
 function M.buildSettings(parent)
     local button = ui.Button.new(parent)
     button.stylesheetID = id.StyleSheet.BUTTON_DEFAULT
@@ -309,6 +310,16 @@ function M.buildSettings(parent)
 
     button:Subscribe(ui.Hook.ONBUTTONPRESSED, function()
         M.openSettings()
+    end)
+
+    local resetButton = ui.Button.new(parent)
+    resetButton.stylesheetID = id.StyleSheet.BUTTON_DEFAULT
+    resetButton.label = "Reset to Defaults"
+    resetButton:SetPos(12, 64)
+    resetButton:SetSize(200, 36)
+
+    resetButton:Subscribe(ui.Hook.ONBUTTONPRESSED, function()
+        M.resetSettings()
     end)
 end
 
@@ -639,8 +650,15 @@ function M.getHoveredDivePosition(playerX, playerZ)
         return { tile = mouseTile }
     end
 
-    local angle = math.deg(math.atan(dx, dz)) % 360
-    return { angle = math.floor(angle / 45 + 0.5) * 45 % 360 }
+    -- directional snapping seems to prefer going a cardinal direction
+    -- if one 'leg' of the triangle is >= 2x the length of the other leg,
+    -- it will go straight. Otherwise, it will go diagonal.
+    -- IE (20 up, 10 right) == straight up
+    --    (19 up, 10 right) == diagional
+    if 2 * math.abs(dz) <= math.abs(dx) then dz = 0 end
+    if 2 * math.abs(dx) <= math.abs(dz) then dx = 0 end
+
+    return { angle = diveDirection.directionForOffset(dx, dz) }
 end
 
 return M
