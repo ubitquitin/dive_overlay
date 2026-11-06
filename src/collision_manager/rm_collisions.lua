@@ -101,10 +101,11 @@ function M.effectiveFlags(rawFlags, footprintLocs, originLocs, nearbyLocs)
     --   - blockWalk = 2 Loc with an opposite-hidden same-name counterpart
     elseif rawFlags ~= 0 then
         for _, loc in ipairs(originLocs) do
-            if (loc.block == 0 and loc.hidden == false)
+            if loc.isActive == true and (
+                (loc.block == 0 and loc.hidden == false)
                 or (loc.hidden == true and loc.block == 1)
-                or (loc.block == 2 and sameNameOppositeHidden(loc, nearbyLocs)) then
-
+                or (loc.block == 2 and sameNameOppositeHidden(loc, nearbyLocs)) -- Doors
+            ) then
                 effective = 0
                 break
             end
