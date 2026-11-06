@@ -3,7 +3,7 @@
 
 This repo encompasses a Runescape 3 Plugin that allows users to see a highlighted mesh of diveable tiles. As Runescape entities can look misleading, and Dive has a somewhat unintuitive algorithm that does not follow traditional line of sight, we hope that this plugin can help enable players to find better pathing in a wide variety of activities. Say goodbye to 1 tile surging and "You can't dive through something you can't walk through!
 
-![How it looks in game](coverphoto.png)
+![How it looks in game](images/coverphoto.png)
 
 The plugin features a few different modes for rendering Dive tiles:
     - Render all diveable tiles
@@ -32,11 +32,13 @@ dive_overlay/
 ├── maps/                                   # Encoded compressed collision data
 │   └── ...
 ├── src/
-│   ├── ui_utils.lua                        # Utilities for the UI
+│   ├── active_tiles.lua                    # Maintains the state of the tiles around the player
+│   ├── debouncer.lua                       # Rate limits changes to opacity renderings
 │   ├── dive_utils.lua                      # Dive algorithm and calcs
 │   ├── dive_direction.lua                  # Utilities around player direction tracking
 │   ├── map_decoder.lua                     # Decodes and caches collision data
 │   ├── resolve_procedural_zones.lua        # Utilities for stitching together procedural generation
+│   ├── ui_utils.lua                        # Utilities for the UI
 │   └── collision_manager/
 │       ├── collision_manager.lua           # Fetches collision data, dynamics and handles zone checking
 │       ├── add_collisions.lua              # Heuristics for dynamic addition of collision data
@@ -64,7 +66,7 @@ This was implemented in the `isDiveable()` method.
 
 ### Collision Data
 
-Runescape cached collision data was downloaded using [this tool](https://github.com/skillbert/rsmv). The collision data keeps a static state of where players can and cannot walk in the game. 
+Runescape cached collision data was downloaded using [this tool](https://github.com/skillbert/rsmv). The collision data keeps a static state of where players can and cannot walk in the game. This data was encoded and compressed into what is now in the `maps/` directory.
 
 For below, we define a map CHUNK as a 64x64 tile region of collision data. We define a map ZONE as an 8x8 subset of a given map chunk. Procedurally generated areas in Runescape will sample 8x8 zones within a source chunk and rotate them randomly to create a "random" looking area.
 
