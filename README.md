@@ -154,12 +154,9 @@ Please see `known_failures.md` for a description of all known failure modes curr
 
 ### Direction and Escape/Surge
 
-Player direction is not updated by the `facing` attribute of the Player Entity after using Bladed dive, or turning after a red click.
+Player direction is not updated by the `facing` attribute of the Player Entity after using Bladed dive, so we track direction every tick and look at dive cooldown player variables in order to update dive direction based on a formula for the direction dive snaps you to.
 
 Escape distance is calculated by accessing the attack range of the player's weapon *if* a ranged weapon is equipped. Tiles are drawn as surge/escape in the direct ordinal or cardinal direction that the player is facing if they are `isDiveable() = True`.
-## TODOs
-- better compress data? https://github.com/ThirdAgeStudio/rs3-collision-map
-- Replace with collisionGrid API if Jagex exposes it. (Remove any and all hardcoding!)
 
 ### Perimeter-Only & Don't Look Back Modes
 
@@ -167,7 +164,18 @@ Both of these are post-processing filters that remove tiles for the user to redu
 
 The [Flood-fill algorithm](https://www.geeksforgeeks.org/dsa/flood-fill-algorithm/) is used for Perimeter-Only. Basically we start just outside the 21x21 grid and run Depth first search (DFS) to find cardinally connected unreachable tiles, creating the boundary of unreachable tiles connected to the outside. Then, a reachable tile is classified as on the perimeter if a cardinal neighbor is in that unreachable set.
 
-The Don't Look Back Mode computes the dot product between the player direction vector and the player to candidate tile vector. If that dot product is less than zero, then the player is not facing the same way as the candidate tile, and thus the candidate tile is masked.
+The "Hide Tiles behind you" mode computes the dot product between the player direction vector and the player to candidate tile vector. If that dot product is less than zero, then the player is not facing the same way as the candidate tile, and thus the candidate tile is masked.
+
+### Rendering and Performance
+
+We use an active list and inactive pool to store Shape Instances of the 441 tiles (10x10 around the player) that could be highlighted at any given moment. This improves performance compared to drawing new shapes every frame. The active list of tiles stores metadata about the tile state, such as if it is diveable and the player direction if dived to.
+
+We use a debouncer to rate limit changes with the opacity sliders.
+
+## TODOs
+- Better compress data, and automate cache updates to collision data in some way? https://github.com/ThirdAgeStudio/rs3-collision-map
+- Replace heuristics with collisionGrid API if Jagex exposes it. (Remove any and all hardcoding!)
+- If Jagex exposes zone rotation, use that API rather than the current inference pattern.
 
 ## Issues
 For any bugs/issues, please open an issue on github.
