@@ -129,12 +129,12 @@ So if a nearby LocType has `isHidden = False` and `blockWalk != 0`, then I modif
 | ROOF_L_CONCAVE |  15   | Roofs should never add collision   |
 | ROOF_L_CONVEX        |   16   | Roofs should never add collision   |
 | ROOF_FLAT           |   17   | Roofs should never add collision   |
-| ROOFEDGE_STRAIGHT    |  18   | 1Roofs should never add collision   |
+| ROOFEDGE_STRAIGHT    |  18   | Roofs should never add collision   |
 | ROOFEDGE_DIAGONALCORNER |  19   | Roofs should never add collision   |
 | ROOFEDGE_L        |   20   | Roofs should never add collision  |
 | ROOFEDGE_SQUARECORNER           |   21   | Roofs should never add collision  |
-| GROUNDDECOR    |  22   | Decor should never add collision |
-| WALL_L_ALT |  23   | Acts like WALL_STRAIGHT until I can verify. |
+| GROUNDDECOR    |  22   | Only adds collision if blockWalk=1 and Hidden=False |
+| WALL_L_ALT |  23   | Never adds collision |
 | WALLDECOR_DIAGONAL_BOTH_ALT        |   24   | Decor should never add collision |
 
 Ultimately these are just heuristics and exceptions will likely happen when playing the game.
@@ -148,24 +148,17 @@ Currently I have a simple rule that I found to be consistent among most of my te
 When directional blocking Locs like doors change, then the original configuration becomes hidden, and therefore collision is removed. `isHidden=True & (shape = 0 | blockWalk > 0)` signifies a rotated door that should be removed as no longer blocking.
 
 
-#### Hardcoded exceptions
+#### Failure Modes
 
-Unfortunately, I have one exception for which I haven't been able to find any change exposed in the Loc data for. The broken ROTS bridges. While an entity gets hidden and a new entity (the broken bridge) appears, both have blockwalk set to 0, indicating they are walkable. Also, the collision data has no blocking on the bridge tiles (probably because the bridges are walkable on the way in). So there is something adding a collision there, and I wasn't able to figure out how to programmatically register it. For now, I have an exceptions file with specific loc IDs that should add collision, but their blockWalk property does not reflect it.
+Please see `known_failures.md` for a description of all known failure modes currently.
 
 ### Direction and Escape/Surge
 
 Player direction is not updated by the `facing` attribute of the Player Entity after using Bladed dive, or turning after a red click.
 
-I haven't accounted for the red click case yet (on the TODOs), but I have a static grid that updates direction for every tile in the 10x10 that one could dive to. This is also what is used in the direction arrows overlay mode.
-
 Escape distance is calculated by accessing the attack range of the player's weapon *if* a ranged weapon is equipped. Tiles are drawn as surge/escape in the direct ordinal or cardinal direction that the player is facing if they are `isDiveable() = True`.
 ## TODOs
-- improve performance? Sampling every frame..?
 - better compress data? https://github.com/ThirdAgeStudio/rs3-collision-map
-- Improve UI overall
-    - minimize button?
-- maybe get it to show during an animation? better for agility.. like a lookahead mode, where it shows where you will be 1 tick in the future.
-- hover mode, where it shows where you end up based on your cursor hover
 - Replace with collisionGrid API if Jagex exposes it. (Remove any and all hardcoding!)
 
 ### Perimeter-Only & Don't Look Back Modes
@@ -176,6 +169,9 @@ The [Flood-fill algorithm](https://www.geeksforgeeks.org/dsa/flood-fill-algorith
 
 The Don't Look Back Mode computes the dot product between the player direction vector and the player to candidate tile vector. If that dot product is less than zero, then the player is not facing the same way as the candidate tile, and thus the candidate tile is masked.
 
-## Acknowledgements
+## Issues
+For any bugs/issues, please open an issue on github.
 
- Thanks to the community on the Runescape Plugin Development server for helping me understand Dive mechanics properly, and for suggestions on UI and usability.
+## Acknowledgements
+Huge shoutout to Seacant for his contributions to this project. This work is as much his as is mine.
+Thanks to the community on the Runescape Plugin Development server for helping me understand Dive mechanics properly, and for suggestions on UI and usability.
