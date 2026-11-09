@@ -38,7 +38,14 @@ dive_overlay/
 │   ├── dive_direction.lua                  # Utilities around player direction tracking
 │   ├── map_decoder.lua                     # Decodes and caches collision data
 │   ├── resolve_procedural_zones.lua        # Utilities for stitching together procedural generation
-│   ├── ui_utils.lua                        # Utilities for the UI
+│   ├── settings/
+│   │   ├── persist.lua                     # Setting defaults, loading and saving
+│   │   └── ui.lua                          # Settings buttons and window
+│   ├── tile/
+│   │   ├── geometry.lua                    # Tile positions and terrain-following corners
+│   │   ├── direct_draw.lua                 # Immediate-mode tile drawing
+│   │   ├── instance_pool.lua               # Pools of reusable ShapeInstances
+│   │   └── instance_draw.lua               # Instance rendering for active tiles
 │   └── collision_manager/
 │       ├── collision_manager.lua           # Fetches collision data, dynamics and handles zone checking
 │       ├── add_collisions.lua              # Heuristics for dynamic addition of collision data

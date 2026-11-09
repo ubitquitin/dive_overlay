@@ -3,6 +3,7 @@
 -- Public API:
 --   update(tileX, tileZ, plane, gameFacing, cooldowns) -> compass degrees or nil
 --   directionForOffset(dx, dz) -> compass degrees or nil
+--   getHoveredDivePosition(playerX, playerZ) -> { tile } or { angle } or {}
 --   getDirection() -> last effective compass direction
 --   clear() -> reset all tracking state
 -- Compass degrees: 0=N, 45=NE, 90=E, ..., 315=NW.
@@ -40,6 +41,36 @@ function M.directionForOffset(dx, dz)
 
     local angle = math.deg(math.atan(dx, dz)) % 360
     return math.floor(angle / 45 + 0.5) * 45 % 360
+end
+
+-- dive seems to have 2 distinct modes:
+-- 1. if within 10 tiles, it goes towards a tile directly
+-- 2. if outside of 10 tiles, it snaps to the 8 octilinear directions
+--    (N, NE, E, etc.)
+-- mode 1 returns { tile = CoordGrid }, mode 2 returns { angle = degrees },
+-- and an empty table is returned when the cursor isn't over the world.
+function M.getHoveredDivePosition(playerX, playerZ)
+    local mousePos = Mouse.GetPosition()
+    local mouseTile = mousePos and ScreenConvert.ScreenToCoordGrid(mousePos)
+    if not mouseTile then return {} end
+
+    local dx = mouseTile.x - playerX
+    local dz = mouseTile.z - playerZ
+
+    -- Grid distance: diagonal steps count as one tile
+    if math.max(math.abs(dx), math.abs(dz)) <= 10 then
+        return { tile = mouseTile }
+    end
+
+    -- directional snapping seems to prefer going a cardinal direction
+    -- if one 'leg' of the triangle is >= 2x the length of the other leg,
+    -- it will go straight. Otherwise, it will go diagonal.
+    -- IE (20 up, 10 right) == straight up
+    --    (19 up, 10 right) == diagional
+    if 2 * math.abs(dz) <= math.abs(dx) then dz = 0 end
+    if 2 * math.abs(dx) <= math.abs(dz) then dx = 0 end
+
+    return { angle = M.directionForOffset(dx, dz) }
 end
 
 -- Apply Offset to the PlayerEntity.facing variable (I found this to be rotated 180 degrees?)

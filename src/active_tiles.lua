@@ -7,16 +7,17 @@
 --
 -- Record fields:
 --   coord, key           CoordGrid and its packed value (set once)
---   corners              ground geometry, filled in by ui_utils when first drawn
+--   corners              ground geometry, filled in by instance_draw when first drawn
 --   ox, oz, facing       offset from the player and the facing after Diving
 --                        there (updated on sync)
 --   isDiveable           whether Dive can reach the tile (per tick)
 --   isBehind             hidden by Hide Behind (per tick / setting change)
 --   perimeterEdges       edge mask if on the outer perimeter, else nil
---   instance, arrow      ShapeInstances and their applied state (ui_utils)
+--   instance, arrow      ShapeInstances and their applied state (instance_draw)
 local diveDirection = require("src/dive_direction")
 local diveUtils = require("src/dive_utils")
-local uiUtils = require("src/ui_utils")
+local geometry = require("src/tile/geometry")
+local instanceDraw = require("src/tile/instance_draw")
 
 local M = {}
 local RADIUS = 10
@@ -61,7 +62,7 @@ function M.sync(coordGrid)
     end
 
     for _, tile in pairs(old) do
-        uiUtils.releaseTile(tile)
+        instanceDraw.releaseTile(tile)
     end
 
     M.tiles, M.byOffset = tiles, byOffset
@@ -112,7 +113,6 @@ function M.traceLine(startX, startZ, dx, dz, maxRange)
     return onLine, outside
 end
 
-
 -- PERIMETER ONLY MODE UTILITY
 -- Sets perimeterEdges on the reachable tiles that form the OUTER perimeter
 -- of the reachable area. Callers clear perimeterEdges first.
@@ -124,7 +124,7 @@ end
 -- 2. Flood-fill through tiles that are NOT reachable by Dive.
 -- 3. Mark all unreachable tiles connected to the outside.
 -- 4. Keep only reachable tiles that border this exterior area, recording
---    which of their sides touch it as an edge mask (S=1, E=2, N=4, W=8).
+--    which of their sides touch it as a geometry edge mask (EDGE_S etc.).
 --
 -- Unreachable pockets completely enclosed by reachable tiles are not
 -- connected to the outside, so their edges are excluded.
@@ -172,10 +172,10 @@ function M.applyPerimeter()
         if M.isReachable(tile) then
             local ox, oz = tile.ox, tile.oz
             local mask = 0
-            if exterior[ox][oz - 1] then mask = mask | 1 end -- South
-            if exterior[ox + 1][oz] then mask = mask | 2 end -- East
-            if exterior[ox][oz + 1] then mask = mask | 4 end -- North
-            if exterior[ox - 1][oz] then mask = mask | 8 end -- West
+            if exterior[ox][oz - 1] then mask = mask | geometry.EDGE_S end
+            if exterior[ox + 1][oz] then mask = mask | geometry.EDGE_E end
+            if exterior[ox][oz + 1] then mask = mask | geometry.EDGE_N end
+            if exterior[ox - 1][oz] then mask = mask | geometry.EDGE_W end
             if mask ~= 0 then tile.perimeterEdges = mask end
         end
     end
@@ -184,7 +184,7 @@ end
 -- Hides every tile.
 function M.hideAll()
     for _, tile in pairs(M.tiles) do
-        uiUtils.hideTile(tile)
+        instanceDraw.hideTile(tile)
     end
 end
 
