@@ -45,34 +45,39 @@ canStep = function(x, z, nx, nz, plane)
     -- Moving East: Check the East boundary of our current tile and the West boundary of our destination tile.
     if dx == 1 and dz == 0 then
         return not flagged(from, EAST)
-           and not flagged(to, WEST)
-    -- Moving West: Check the West boundary of our current tile and the East boundary of our destination tile.
+            and not flagged(to, WEST)
+        -- Moving West: Check the West boundary of our current tile and the East boundary of our destination tile.
     elseif dx == -1 and dz == 0 then
         return not flagged(from, WEST)
-           and not flagged(to, EAST)
-    -- Moving North: Check the North boundary of our current tile and the South boundary of our destination tile.
+            and not flagged(to, EAST)
+        -- Moving North: Check the North boundary of our current tile and the South boundary of our destination tile.
     elseif dx == 0 and dz == 1 then
         return not flagged(from, NORTH)
-           and not flagged(to, SOUTH)
-    -- Moving South: Check the South boundary of our current tile and the North boundary of our destination tile.
+            and not flagged(to, SOUTH)
+        -- Moving South: Check the South boundary of our current tile and the North boundary of our destination tile.
     elseif dx == 0 and dz == -1 then
         return not flagged(from, SOUTH)
-           and not flagged(to, NORTH)
-    -- Diagonal Movement Check: Get the ordinal direction based on the dx, dz magnitudes
+            and not flagged(to, NORTH)
+        -- Diagonal Movement Check: Get the ordinal direction based on the dx, dz magnitudes
     elseif math.abs(dx) == 1 and math.abs(dz) == 1 then
         local cornerFrom, cornerTo
-        if dx == 1 and dz == 1 then cornerFrom, cornerTo = NE, SW
-        elseif dx == -1 and dz == 1 then cornerFrom, cornerTo = NW, SE
-        elseif dx == 1 and dz == -1 then cornerFrom, cornerTo = SE, NW
-        else cornerFrom, cornerTo = SW, NE end
+        if dx == 1 and dz == 1 then
+            cornerFrom, cornerTo = NE, SW
+        elseif dx == -1 and dz == 1 then
+            cornerFrom, cornerTo = NW, SE
+        elseif dx == 1 and dz == -1 then
+            cornerFrom, cornerTo = SE, NW
+        else
+            cornerFrom, cornerTo = SW, NE
+        end
         if flagged(from, cornerFrom) or flagged(to, cornerTo) then return false end
         -- Check if we can step cardinally in X, cardinally in Z, and ordinally in X and Z
         -- If we cannot step from nx,z to nx,nz AND x,nz to nx,nz, then we would be wall clipping.
         -- So we must check all 4 are true for valid tile walk diagonally.
         return canStep(x, z, nx, z, plane)
-           and canStep(nx, z, nx, nz, plane)
-           and canStep(x, z, x, nz, plane)
-           and canStep(x, nz, nx, nz, plane)
+            and canStep(nx, z, nx, nz, plane)
+            and canStep(x, z, x, nz, plane)
+            and canStep(x, nz, nx, nz, plane)
     end
     return false
 end
@@ -106,11 +111,11 @@ function M.isDiveable(startX, startZ, targetX, targetZ, plane)
             and canStep(x, z, x + sx, z + sz, plane) then
             x = x + sx
             z = z + sz
-        -- Priority 2: Horizontal (E/W)
+            -- Priority 2: Horizontal (E/W)
         elseif sx ~= 0
             and canStep(x, z, x + sx, z, plane) then
             x = x + sx
-        -- Priority 3: Vertical (N/S)
+            -- Priority 3: Vertical (N/S)
         elseif sz ~= 0
             and canStep(x, z, x, z + sz, plane) then
             z = z + sz
@@ -121,7 +126,6 @@ function M.isDiveable(startX, startZ, targetX, targetZ, plane)
     end
     return true
 end
-
 
 -- Converts the player's compass-facing angle into a tile direction (dx, dz)
 -- for projecting Surge and Escape destinations.
@@ -138,14 +142,14 @@ end
 -- from North. Each entry specifies how X and Z change for one tile of
 -- movement in that direction.
 local compass = {
-    {0, 1},    -- North
-    {1, 1},    -- Northeast
-    {1, 0},    -- East
-    {1, -1},   -- Southeast
-    {0, -1},   -- South
-    {-1, -1},  -- Southwest
-    {-1, 0},   -- West
-    {-1, 1}    -- Northwest
+    { 0,  1 }, -- North
+    { 1,  1 }, -- Northeast
+    { 1,  0 }, -- East
+    { 1,  -1 }, -- Southeast
+    { 0,  -1 }, -- South
+    { -1, -1 }, -- Southwest
+    { -1, 0 }, -- West
+    { -1, 1 } -- Northwest
 }
 
 -- Rounds the input angle to the nearest 45-degree compass direction
@@ -160,6 +164,14 @@ function M.compassVector(degrees)
     return compass[sector][1], compass[sector][2]
 end
 
+-- Whether an active tile record is in front of the player, for the
+-- "Hide dive tiles behind" setting. The tile's offset from the player
+-- (tile.ox, tile.oz) is dotted with the facing's compass vector; tiles in
+-- the forward half-plane, including perpendicular ones, count as in front.
+function M.isTileInFront(tile, facing)
+    local facingX, facingZ = M.compassVector(facing)
+    return tile.ox * facingX + tile.oz * facingZ >= 0
+end
 
 -- Determines Escape's maximum distance based on the equipped main-hand weapon.
 --
@@ -172,12 +184,10 @@ end
 -- If the equipment API is unavailable, the item has no relevant parameter,
 -- or an error occurs, use the default distance.
 function M.getEscapeDistance()
-
     -- pcall prevents an equipment/API error from crashing the plugin.
     -- 'ok' indicates whether the function executed successfully.
     -- 'result' contains the returned parameter value, or nil.
     local ok, result = pcall(function()
-
         -- Access the player's worn equipment inventory.
         local worn = Inventory.Find(config.Inv.WORN)
         if not worn or not worn.isValid then return nil end
@@ -207,6 +217,5 @@ function M.getEscapeDistance()
     -- Subtract 1, then constrain the result to a minimum of 3 and maximum of 8.
     return math.max(3, math.min(8, result - 1))
 end
-
 
 return M

@@ -18,9 +18,15 @@ local isDiveCursor = false
 local collisionManager = require("src/collision_manager/collision_manager")
 local diveDirection = require("src/dive_direction")
 local diveUtils = require("src/dive_utils")
-local uiUtils = require("src/ui_utils")
+local persist = require("src/settings/persist")
+local settingsUi = require("src/settings/ui")
+local geometry = require("src/tile/geometry")
+local instanceDraw = require("src/tile/instance_draw")
+local directDraw = require("src/tile/direct_draw")
 local activeTiles = require("src/active_tiles")
 local debouncer = require("src/debouncer")
+
+local settings = persist.settings
 
 -- Utility function to read a player var safely: a missing var must not abort drawing.
 local function vp(id)
@@ -34,7 +40,7 @@ end
 
 -- Populate the native Plugin Hub settings layer when opened.
 Event.SettingsLayerReady.Subscribe("diveOverlaySettings", function(event)
-    uiUtils.buildSettings(event.component)
+    settingsUi.buildSettings(event.component)
 end)
 
 -- Runs debounced calls, such as settings changes from sliders.
@@ -106,7 +112,7 @@ local function doTick()
     )
 
     -- Whether the Hide Behind filter applies this tick.
-    local hideBehind = uiUtils.settings.hideBehind and type(effectiveFacing) == "number"
+    local hideBehind = settings.hideBehind and type(effectiveFacing) == "number"
 
     -- Re-centre the active tiles on the player before writing this tick's data.
     activeTiles.sync(coordGrid)
@@ -119,12 +125,12 @@ local function doTick()
                 coordGrid.x, coordGrid.z,
                 tile.coord.x, tile.coord.z, coordGrid.level
             )
-        tile.isBehind = hideBehind and not uiUtils.isTileInFront(tile, effectiveFacing)
+        tile.isBehind = hideBehind and not diveUtils.isTileInFront(tile, effectiveFacing)
         tile.perimeterEdges = nil
     end
 
     -- Mark the outermost reachable tiles and which of their sides face outward.
-    local mode = uiUtils.settings.diveMode
+    local mode = settings.diveMode
     if mode == "perimeter" or mode == "edges" then
         activeTiles.applyPerimeter()
     end
@@ -166,7 +172,7 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
     end
 
     -- Grab the dive tile render mode from plugin settings
-    local mode = uiUtils.settings.diveMode
+    local mode = settings.diveMode
     -- edgesMode renders only the outer edges of the tile and no fill
     local edgesMode = mode == "edges"
 
@@ -181,7 +187,7 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
         -- Get mouse hover direction
         -- getHoveredDivePosition() returns an angle when the player's cursor is out of the
         -- 21x21 dive range. Else, it returns a specific dive tile coord.
-        local diveResult = uiUtils.getHoveredDivePosition(
+        local diveResult = diveDirection.getHoveredDivePosition(
             playerTileX, playerTileZ
         )
         -- if an angle was returned, find the furthest reachable tile in that direction
@@ -207,14 +213,14 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
 
 
     -- show where you would surge after you dive
-    local useDiveSurgePreview = uiUtils.settings.surgeFollowsHover and isDiveCursor
+    local useDiveSurgePreview = settings.surgeFollowsHover and isDiveCursor
     local surgePreview, surgePreviewOutside = {}, {}
     if (useDiveSurgePreview
             and hoverTile
             and activeTiles.isReachable(hoverTile)
             -- should we require surge to be on for this to be on?
             -- should we allow both to be on at the same time?
-            and uiUtils.settings.showSurge
+            and settings.showSurge
         ) then
         local facing = hoverTile.facing
         if facing then
@@ -226,12 +232,12 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
 
     -- the surge line in front of the player currently hides if we decide to
     -- show one at the current dive cursor instead
-    local showPlayerSurgePreview = uiUtils.settings.showSurge and not useDiveSurgePreview
+    local showPlayerSurgePreview = settings.showSurge and not useDiveSurgePreview
 
     -- Draw Tiles based on forward, backward, reachable sets and visual toggles
     for _, tile in pairs(activeTiles.tiles) do
         local reachable = activeTiles.isReachable(tile)
-        local hoverVisible = uiUtils.settings.showHover
+        local hoverVisible = settings.showHover
             and reachable and tile == hoverTile
         local diveVisible = reachable
             and (
@@ -244,38 +250,38 @@ Event.Draw.Subscribe("bladedDiveTiles", function(drawEvent)
             or (edgesMode and tile.perimeterEdges ~= nil)
 
         local colour
-        local shape = uiUtils.TILE_FULL
+        local shape = geometry.TILE_FULL
         if hoverVisible then
             -- Render hover tile
-            colour = uiUtils.settings.hoverColour
+            colour = settings.hoverColour
         elseif surgePreview[tile] then
             -- render Surge
-            colour = uiUtils.settings.surgeColour
+            colour = settings.surgeColour
         elseif showPlayerSurgePreview and forward[tile] then
             -- render Surge preview
-            colour = uiUtils.settings.surgeColour
-        elseif uiUtils.settings.showEscape and backward[tile] then
+            colour = settings.surgeColour
+        elseif settings.showEscape and backward[tile] then
             -- render Escape
-            colour = uiUtils.settings.escapeColour
+            colour = settings.escapeColour
         elseif diveVisible then
             -- render dive tiles
-            colour = uiUtils.settings.diveColour
+            colour = settings.diveColour
         elseif edgesMode and tile.perimeterEdges ~= nil then
             -- render only the edges bordering the exterior flood-fill region
-            colour = uiUtils.settings.diveColour
+            colour = settings.diveColour
             shape = tile.perimeterEdges
         end
 
-        uiUtils.setTile(tile, colour, shape)
+        instanceDraw.setTile(tile, colour, shape)
 
         -- render directional arrows
-        uiUtils.setTileArrow(tile,
-            uiUtils.settings.showArrows and (diveArrowVisible or hoverVisible))
+        instanceDraw.setTileArrow(tile,
+            settings.showArrows and (diveArrowVisible or hoverVisible))
     end
 
     -- draw surge preview outside of radius
     for _, point in ipairs(surgePreviewOutside) do
-        uiUtils.drawTile(point.x, point.z, plane, uiUtils.surgeRGBA)
+        directDraw.drawTile(point.x, point.z, plane, settings.surgeColour)
     end
 end)
 
@@ -302,7 +308,8 @@ end
 -- Unsubscribe from all created events, and save user UI settings to PersistentDB
 function PluginShutdown()
     debouncer.flush()
-    uiUtils.saveSettings()
+    persist.saveSettings()
+    settingsUi.destroy()
 
     Event.SettingsLayerReady.Unsubscribe("diveOverlaySettings")
     Event.Logic.Unsubscribe("diveOverlayDebounce")
