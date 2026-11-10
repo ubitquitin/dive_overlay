@@ -3,6 +3,7 @@
 -- Public API:
 --   update(tileX, tileZ, plane, gameFacing, cooldowns) -> compass degrees or nil
 --   directionForOffset(dx, dz) -> compass degrees or nil
+--   snapDirection(dx, dz) -> compass degrees Dive snaps to beyond its range
 --   getHoveredDivePosition(playerX, playerZ) -> { tile } or { angle } or {}
 --   getDirection() -> last effective compass direction
 --   clear() -> reset all tracking state
@@ -43,6 +44,42 @@ function M.directionForOffset(dx, dz)
     return math.floor(angle / 45 + 0.5) * 45 % 360
 end
 
+-- The direction Dive snaps to for a click beyond its range
+--
+-- Sirectional snapping is based on the coordinate difference between the tile
+-- you clicked on vs. your current tile (dx, dz). if one is over 2x larger than
+-- the other, you dive straight. Otherwise, you dive diagonally
+function M.snapDirection(dx, dz)
+    -- At exactly 2x, the tie-break is asymmetrical and seems to prefer
+    -- whichever of the two candidate directions is further east.
+    -- I cannot explain why the game would do this, but it is consistent
+    if 2 * math.abs(dx) == math.abs(dz)
+        or 2 * math.abs(dz) == math.abs(dx) then
+        -- treat the target as one tile further east.
+        dx = dx + 1
+    end
+
+    local ax, az = math.abs(dx), math.abs(dz)
+    local north, east = dz > 0, dx > 0
+
+    -- Straight N or S
+    if 2 * ax < az then
+        if north then return 0 else return 180 end
+    end
+
+    -- Straight E or W
+    if 2 * az < ax then
+        if east then return 90 else return 270 end
+    end
+
+    -- Diagonal
+    if north then
+        if east then return 45 else return 315 end
+    else
+        if east then return 135 else return 225 end
+    end
+end
+
 -- dive seems to have 2 distinct modes:
 -- 1. if within 10 tiles, it goes towards a tile directly
 -- 2. if outside of 10 tiles, it snaps to the 8 octilinear directions
@@ -62,15 +99,7 @@ function M.getHoveredDivePosition(playerX, playerZ)
         return { tile = mouseTile }
     end
 
-    -- directional snapping seems to prefer going a cardinal direction
-    -- if one 'leg' of the triangle is >= 2x the length of the other leg,
-    -- it will go straight. Otherwise, it will go diagonal.
-    -- IE (20 up, 10 right) == straight up
-    --    (19 up, 10 right) == diagional
-    if 2 * math.abs(dz) <= math.abs(dx) then dz = 0 end
-    if 2 * math.abs(dx) <= math.abs(dz) then dx = 0 end
-
-    return { angle = M.directionForOffset(dx, dz) }
+    return { angle = M.snapDirection(dx, dz) }
 end
 
 -- Apply Offset to the PlayerEntity.facing variable (I found this to be rotated 180 degrees?)
