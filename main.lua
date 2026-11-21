@@ -5,11 +5,11 @@
 -- Constants
 local RADIUS = 10 -- Dive radius (tiles)
 local SURGE_RANGE = 10 -- surge range (tiles)
-local DIVE_COOLDOWN_END_PLAYERVAR_ID = 6961 -- Dive Cooldown playervar for player direction update
-local SURGE_COOLDOWN_END_PLAYERVAR_ID = 8670 -- Surge Cooldown playervar for player direction update
-local ESC_COOLDOWN_END_PLAYERVAR_ID = 983 -- Escape Cooldown playervar for player direction update
-local DIVE_CURSOR_ID = 157 -- Dive Cursor Sprite ID for hover tile rendering when dive active
-local BLADED_DIVE_CURSOR_ID = 42 -- Bladed Dive Cursor Sprite ID for hover tile rendering when dive active
+local DIVE_COOLDOWN_END_PLAYERVAR_ID = id.VarPlayer.COMBATV2_COOLDOWN_ATTACK_BLADED_DIVE_END -- Dive Cooldown playervar for player direction update
+local SURGE_COOLDOWN_END_PLAYERVAR_ID = id.VarPlayer.COMBATV2_COOLDOWN_MAGIC_SURGE_CHARGE2_END -- Surge Cooldown playervar for player direction update
+local ESC_COOLDOWN_END_PLAYERVAR_ID = id.VarPlayer.COMBATV2_COOLDOWN_RANGED_ESCAPE_END -- Escape Cooldown playervar for player direction update
+local DIVE_CURSOR_ID = id.Cursor.CURSOR_TICK -- Dive Cursor Sprite ID for hover tile rendering when dive active
+local BLADED_DIVE_CURSOR_ID = id.Cursor.CURSOR_ATTACK -- Bladed Dive Cursor Sprite ID for hover tile rendering when dive active
 
 -- Whether the cursor currently displays the Dive sprite.
 local isDiveCursor = false
