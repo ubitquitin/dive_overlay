@@ -40,7 +40,9 @@ function M.addedCollisionMask(loc)
     -- For ground decoration, enforce that blockWalk = 1
     elseif (shape == 22 and loc.block == 1) then
         return CENTER
-
+    -- Shape 10 MultiLocs with blockWalk = 2 may inherit nonblocking collision behaviour from their parent.
+    elseif shape == 10 and loc.block == 2 and loc.isMultiLoc == true and loc.parentBlock == 0 then
+        return 0
     -- Otherwise return central blocking for the respective remaining shapes
     elseif shape == 9 or shape == 10 or shape == 11 then
         return CENTER
