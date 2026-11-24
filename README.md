@@ -114,14 +114,16 @@ LocTypes have a few important properties.
 
 `size`: e.g. 1x1, 3x3, 5x1... used to fill out all tiles the entity occupies if it's blocking movement.
 
+`isMultiLoc`: If the location has a parent loc. Sometimes the loc can inherit properties from its parent.
+
 So if a nearby LocType has `isHidden = False` and `blockWalk != 0`, then I modify the collision data based on the LocType's [shapeType](https://developer.runescape.com/rs/game/config/loctype.html?h=locsh#locshapetype) value:
 
 | LocType.shapeType name              | Value | Behavior |
 | :---------------- | :------: | ----: |
 | WALL_STRAIGHT        |   0   | Usually doors; Check rotation: 0 = West block, 1 = North block, 2 = East block, 3 = South block |
-| WALL_DIAGONALCORNER           |   1   | Don't add collision - NEEDS VERIFICATION (likely adds corner collision) |
+| WALL_DIAGONALCORNER           |   1   | Don't add collision - (likely adds corner collision) |
 | WALL_L    |  2   | Blocks in two directions. 0 = West+North, 1=North+East, 2=East+South, 3=South+West |
-| WALL_SQUARECORNER |  3   | Don't add collision - NEEDS VERIFICATION (likely adds corner collision) |
+| WALL_SQUARECORNER |  3   | Don't add collision - (likely adds corner collision) |
 | WALLDECOR_STRAIGHT_NOOFFSET       |   4   | Decor should never add collision |
 | WALLDECOR_STRAIGHT_OFFSET           |   5   | Decor should never add collision |
 | WALLDECOR_DIAGONAL_OFFSET    |  6   | Decor should never add collision |

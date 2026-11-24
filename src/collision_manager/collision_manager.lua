@@ -41,7 +41,7 @@ local cached_zones = {}
 -- Called by refreshMappingMode() when an instance needs checking.
 -- Return true if any neighboring source zones do not preserve
 -- their original relative positions.
-local function detectWhetherProcedural(zone_ind_x,zone_ind_z,plane)   
+local function detectWhetherProcedural(zone_ind_x,zone_ind_z,plane)
     -- check every zone in the procedural scan radius (typically 2 zones out to combat 2x2 zone groups)
     for x=zone_ind_x-PROCEDURAL_SCAN_RADIUS,zone_ind_x+PROCEDURAL_SCAN_RADIUS do
         for z=zone_ind_z-PROCEDURAL_SCAN_RADIUS,zone_ind_z+PROCEDURAL_SCAN_RADIUS do
@@ -52,7 +52,7 @@ local function detectWhetherProcedural(zone_ind_x,zone_ind_z,plane)
                 -- Look up the source zones of its eastern and northern neighbors.
                 local east = zoneRotation.sourceForZone(x+1, z, plane)
                 local north = zoneRotation.sourceForZone(x, z+1, plane)
-                
+
                 if east then
                     -- Check whether moving east in the instance
                     -- also moves east in the source map.
@@ -88,7 +88,7 @@ local function refreshMappingMode(worldtile_x,worldtile_z,plane,instanced)
 
     -- Skip classification if nothing has changed since the last check.
     if not mappingClassificationDirty then return end
-    
+
     -- Classification is being handled, so clear the dirty flag.
     mappingClassificationDirty = false
 
@@ -164,7 +164,7 @@ end
 local function fetchZone(worldtile_x,worldtile_z,plane,instanced)
     local zone_ind_x,zone_ind_z = math.floor(worldtile_x/8), math.floor(worldtile_z/8)
     local k = key(zone_ind_x,zone_ind_z,plane)
-    
+
     local cached = cached_zones[k]
     -- If zone info is cached return it.
     -- But retry unresolved mappings and rotations.
@@ -197,7 +197,7 @@ local function fetchZone(worldtile_x,worldtile_z,plane,instanced)
             entry.sourcePlane = source.source_region_plane
         end
     end
-    
+
     if entry.sourceX then
         if instanced and isProceduralMapping then
             -- Per-zone rotation inference from adjacent source-zone mappings.
@@ -243,7 +243,7 @@ function M.updateRegionState(x, z, plane)
 
     -- If we've entered or exited an instance,
     -- invalidate cached zone mappings and procedural state.
-    -- 
+    --
     -- RegionCreated/RegionUpdated events handle changes within an instance.
     if previousRegion ~= nil and previousRegion ~= instanced then
         clearMappings(true)
@@ -314,7 +314,7 @@ end
 -- Returns source x, z, plane, instance status, and rotation; nil on failure.
 function M.getSourceTile(x,z,plane)
     if type(x)~='number' or type(z)~='number' or type(plane)~='number' then return nil end
-    
+
     x,z,plane = math.floor(x),math.floor(z),math.floor(plane)
 
     local instanced = isInsideInstance()
@@ -373,7 +373,7 @@ local function readLoc(loc)
         block = 0
     end
 
-    -- get the locations' isHidden property. 
+    -- get the locations' isHidden property.
     -- Locations that are hidden often invert their blockWalk
     local hidden = readProperty(loc, "isHidden")
 
@@ -384,6 +384,18 @@ local function readLoc(loc)
     -- get the locations' displayName
     local name = readProperty(loc, "displayName")
     if type(name) ~= "string" then name = "" end
+
+    -- get if the location is a multiLoc
+    local isMultiLoc = readProperty(loc, "isMultiLoc") == true
+
+    -- get the parent blockWalk value for multiLocs, if available
+    local parentBlock
+    if isMultiLoc then
+        local parentCfg = readProperty(loc, "parentConfig")
+        if parentCfg then
+            parentBlock = tonumber(readProperty(parentCfg, "blockWalk"))
+        end
+    end
 
     -- return a comprehansive table of Location properties
     return {
@@ -403,7 +415,9 @@ local function readLoc(loc)
         examineOnly = readProperty(cfg, "isExamineOnly"),
         isActive = readProperty(cfg, "isActive"),
         shape = tonumber(readProperty(loc, "shapeType"))
-            or tonumber(readProperty(cfg, "shapeType"))
+            or tonumber(readProperty(cfg, "shapeType")),
+        isMultiLoc = isMultiLoc,
+        parentBlock = parentBlock
     }
 end
 
@@ -449,7 +463,7 @@ function M.rebuildCollisionOverrides(playerGrid, radius)
     if not playerGrid or not LocList or not LocList.ByDistance then
         return
     end
-    
+
     -- search radius for locs
     radius = math.max(1, math.floor(radius or DEFAULT_RADIUS))
 
