@@ -2,13 +2,13 @@
 -- Loads and decodes the collision data for individual world tiles.
 --
 -- RuneScape's collision data is stored in 64x64 tile chunks.
--- The maps/ directory contains compressed collision data for these chunks,
--- organized into shard files. maps/index.lua identifies which shard contains
+-- The data/maps/ directory contains compressed collision data for these chunks,
+-- organized into shard files. data/maps/index.lua identifies which shard contains
 -- a particular chunk.
 --
 -- Given a world tile coordinate (x, z, plane), this module:
 -- 1. Determines which 64x64 chunk contains the tile.
--- 2. Finds and loads that chunk's collision data from maps/.
+-- 2. Finds and loads that chunk's collision data from data/maps/.
 -- 3. Decodes the compressed data into bytes.
 -- 4. Extracts and returns the collision flags for the requested tile.
 --
@@ -23,7 +23,7 @@
 local M = {}
 
 -- Maps each chunk key ("cx_cz_plane") to the shard file containing it.
-local index = require('maps/index')
+local index = require('data/maps/index')
 
 -- Shard files contain encoded collision data for multiple chunks.
 -- Keep loaded shard tables here so they can be reused.
@@ -109,7 +109,7 @@ end
 -- plane: The map's vertical plane.
 --
 -- First checks whether the chunk has already been decoded and cached.
--- Otherwise, uses maps/index.lua to locate its shard, loads the encoded
+-- Otherwise, uses data/maps/index.lua to locate its shard, loads the encoded
 -- data, decodes it, and adds the result to the cache.
 --
 -- Returns nil if the requested chunk is absent from the index or shard.
@@ -136,10 +136,10 @@ local function getMap(cx, cz, plane)
     local shard = shards[shardId]
 
     if not shard then
-        -- Support both maps/map_01.lua and maps/maps_001.lua naming.
+        -- Support both data/maps/map_01.lua and data/maps/maps_001.lua naming.
         local paths = {
-            string.format('maps/map_%02d', shardId),
-            string.format('maps/maps_%03d', shardId),
+            string.format('data/maps/map_%02d', shardId),
+            string.format('data/maps/maps_%03d', shardId),
         }
 
         local errors = {}
