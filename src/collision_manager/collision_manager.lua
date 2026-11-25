@@ -581,8 +581,6 @@ function M.rebuildCollisionOverrides(playerGrid, radius)
 
     -- Add visible shape-based directional walls after static clearance.
     addCollisions.addVisibleWallEdges(locs, effectiveByTile)
-    -- Add center collision to edge case locs in special_cases.lua
-    addCollisions.applyServerBlockingLocs(locs, effectiveByTile)
 
     -- Publish the completed collision grid for getFlags().
     --
