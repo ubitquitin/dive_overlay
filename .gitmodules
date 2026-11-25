@@ -1,0 +1,4 @@
+[submodule "tools/rsmv"]
+	path = tools/rsmv
+	url = https://github.com/ubitquitin/rsmv.git
+	branch = collision-export
