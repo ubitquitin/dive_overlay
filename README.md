@@ -55,6 +55,18 @@ dive_overlay/
 
 ## How it Works
 
+For below, we define a map CHUNK as a 64x64 tile region of collision data. We define a map ZONE as an 8x8 subset of a given map chunk. Procedurally generated areas in Runescape will sample 8x8 zones within a source chunk and rotate them randomly to create a "random" looking area.
+
+The Plugin works by doing the following:
+
+1. On plugin startup, and whenever RegionCreated or [RegionUpdated](https://developer.runescape.com/rs/core/events.html?h=zone#regionupdated) fires, the plugin checks whether the player is in an instance and whether that instance is procedural (e.g., ROTS, Dungeoneering). Procedural instances are identified by examining the source mappings and rotations of neighboring zones.
+2. Whenever the player enters a new map ZONE, the plugin checks for what new collision data is needed by observing all map source CHUNKS that intersect with a 32-tile radius around the player.
+- Overworld and non-procedural instances: Load any missing 64x64 map chunks intersecting the radius, reusing previously cached data.
+- Procedural instances: Resolve the source coordinates and rotation of the surrounding 8x8 ZONES (up to 32 tiles away), in order to properly cache and apply rotatiosn to the collision data. Rotation is resolved by checking movement in the source chunk relative to movement in the randomly rotated map zone.
+3. Applies Dynamic collision ADDITION and REMOVAL based on [LocTypes](https://developer.runescape.com/rs/game/config/loctype.html) present.
+4. Runs isDiveable() on the 21x21 region of tiles around the player given the finalized collision grid.
+
+
 ### Dive Algorithm
 Dive (and surge/escape) validate locations by moving towards the targetted tile, checking diagonally, then E/W, then N/S until either the tile is reached, or the pathing gets stuck due to collision with obstacles. Specifically, for each step until the algorithm reaches the target or stalls out, it does the following:
 
@@ -73,18 +85,8 @@ This was implemented in the `isDiveable()` method.
 
 ### Collision Data
 
-Runescape cached collision data was downloaded using [this tool](https://github.com/skillbert/rsmv). The collision data keeps a static state of where players can and cannot walk in the game. This data was encoded and compressed into what is now in the `maps/` directory.
+Runescape cached collision data was downloaded using [this tool](https://github.com/skillbert/rsmv). The collision data keeps a static state of where players can and cannot walk in the game. This data was encoded and compressed into what is now in the `data/maps/` directory. A bitmap was also constructed from the cache for the locEntity ids with parameter `blocks_movement = True`. Full details of this process and utility scripts used can be found [here](https://github.com/ubitquitin/rsmv/blob/collision-export/COLLISION_EXPORT.md).
 
-For below, we define a map CHUNK as a 64x64 tile region of collision data. We define a map ZONE as an 8x8 subset of a given map chunk. Procedurally generated areas in Runescape will sample 8x8 zones within a source chunk and rotate them randomly to create a "random" looking area.
-
-The Plugin works by doing the following:
-
-1. On plugin startup, and whenever RegionCreated or [RegionUpdated](https://developer.runescape.com/rs/core/events.html?h=zone#regionupdated) fires, the plugin checks whether the player is in an instance and whether that instance is procedural (e.g., ROTS, Dungeoneering). Procedural instances are identified by examining the source mappings and rotations of neighboring zones.
-2. Whenever the player enters a new map ZONE, the plugin checks for what new collision data is needed by observing all map source CHUNKS that intersect with a 32-tile radius around the player.
-- Overworld and non-procedural instances: Load any missing 64x64 map chunks intersecting the radius, reusing previously cached data.
-- Procedural instances: Resolve the source coordinates and rotation of the surrounding 8x8 ZONES (up to 32 tiles away), in order to properly cache and apply rotatiosn to the collision data. Rotation is resolved by checking movement in the source chunk relative to movement in the randomly rotated map zone.
-3. Applies Dynamic collision ADDITION and REMOVAL based on [LocTypes](https://developer.runescape.com/rs/game/config/loctype.html) present.
-4. Runs isDiveable() on the 21x21 region of tiles around the player given the finalized collision grid.
 
 ### Procedurally generated areas
 
