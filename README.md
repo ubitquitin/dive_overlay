@@ -29,8 +29,10 @@ dive_overlay/
 ├── main.lua                                # The main entrypoint
 ├── plugin.json                             # Plugin metadata
 ├── README.md                               # What you're reading right. now.
-├── maps/                                   # Encoded compressed collision data
-│   └── ...
+├── data/                                   
+│   ├── maps/                               # Encoded compressed collision data
+│   │   └── ...
+│   └── blocking_locs.lua                   # Bitmap of world objects from cache that block movement
 ├── src/
 │   ├── active_tiles.lua                    # Maintains the state of the tiles around the player
 │   ├── debouncer.lua                       # Rate limits changes to opacity renderings
@@ -158,7 +160,7 @@ Think about cutting a spiderweb in the wilderness or the ROTS entry barriers dis
 
 Currently I have a simple rule that I found to be consistent among most of my test cases. Block walk does not matter here, because LocType entities can have various blockWalk behavior depending on how the player interacts with them. (E.g. the first ROTS barrier is blockwalk=1 since the player cannot pass without pads being filled. The second ROTS barrier is blockwalk=0, since the player can always just left click to pass through it.) What ended up being consistent for me was:
 `isHidden=True & (isActive=True | blockWalk=1)`. If this evaluates true, I remove the cached CENTER collision from its footprint, provided there is no overlapping visible Loc that independently contributes CENTER collision.
-When directional blocking Locs like doors change, then the original configuration becomes hidden, and therefore collision is removed. `isHidden=True & (shape = 0 | blockWalk > 0)` signifies a rotated door that should be removed as no longer blocking.
+When directional blocking Locs like doors change, then the original configuration becomes hidden, and therefore collision is removed. `isHidden=True & (blockWalk = 1 | blockWalk = 2 & sameName,opposite Hidden state Loc adjacent)` signifies a rotated door that should be removed as no longer blocking.
 
 
 #### Failure Modes
@@ -187,7 +189,7 @@ We use a debouncer to rate limit changes with the opacity sliders.
 
 ## TODOs
 - Better compress data, and automate cache updates to collision data in some way? https://github.com/ThirdAgeStudio/rs3-collision-map
-- Replace heuristics with collisionGrid API if Jagex exposes it. (Remove any and all hardcoding!)
+- Replace heuristics with collisionGrid API if Jagex exposes it.
 - If Jagex exposes zone rotation, use that API rather than the current inference pattern.
 
 ## Issues
