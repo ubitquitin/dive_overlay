@@ -96,9 +96,11 @@ Some areas on Runescape like Dungeoneering and ROTS created "random" instances b
 
 Runescape does not (yet) expose the dynamic collision data through the API. Hopefully, if this is added, the plugin can become more reliable. This means that when obstacles like barriers dissappear, doors open & close, or wildy spiderwebs get cut, the state of collisions and movement change and deviate from the cached data.
 
-#### Obstacles ADDING collisions
+Here is a diagram of the most up to date logic regarding the transformation from the static collision data to the finalized dynamic collision map. These heuristics aim to approximate what we see in game.
 
-*Note: I am aware of LocAdded and LocRemoved events, these may be a more performant way of detecting changes than my current sampling that I hope to test.*
+![Collision Logic](images/collisionlogic1.png)
+
+#### Obstacles ADDING collisions
 
 LocTypes have a few important properties.
 
