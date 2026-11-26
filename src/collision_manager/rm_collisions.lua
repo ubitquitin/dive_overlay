@@ -14,17 +14,51 @@
 -- then applies additional collision rules from add_collisions.lua.
 --
 -- NOTE: These are heuristics, not a complete reconstruction of the
--- game's collision system. The existing non-wall blockWalk=0 clearing
--- behavior is intentionally preserved. See README for limitations.
+-- game's collision system. Directional collision removal is restricted
+-- to the shape and rotation of qualifying hidden Locs to avoid removing
+-- unrelated static collision. See README for limitations.
 -- ============================================================================
 
 local M = {}
 -- Bit 0 represents blocking at the center of a tile.
 local CENTER = 1
+-- door rotation mapping
+local WALL_BY_ROTATION = {
+    [0] = 2,  -- West
+    [1] = 4,  -- North
+    [2] = 8,  -- East
+    [3] = 16  -- South
+}
+
+local LWALL_BY_ROTATION = {
+    [0] = 2 | 4,   -- West + North = 6
+    [1] = 4 | 8,   -- North + East = 12
+    [2] = 8 | 16,  -- East + South = 24
+    [3] = 16 | 2   -- South + West = 18
+}
 
 -- Reuse the addition module's shape-based collision classification to
 -- determine whether a visible Loc contributes CENTER blocking.
 local addCollisions = require("src/collision_manager/add_collisions")
+
+-- Helper function to calculate the directional collision from a loc Entity
+-- based on the shape and rotation of the loc
+local function staleDirectionalMask(loc)
+    if loc.rotation == nil then
+        return 0
+    end
+
+    local rotation = loc.rotation % 4
+
+    if loc.shape == 0 then
+        return WALL_BY_ROTATION[rotation] or 0
+
+    elseif loc.shape == 2 then
+        return LWALL_BY_ROTATION[rotation] or 0
+    end
+
+    return 0
+end
 
 
 -- ============================================================================
@@ -47,7 +81,9 @@ local addCollisions = require("src/collision_manager/add_collisions")
 --
 -- Returns true when such a counterpart exists.
 local function sameNameOppositeHidden(a, locs)
-    if a.name == "" then return false end
+    if a.name == nil or a.name == "" then
+        return false
+    end
     for _,b in ipairs(locs) do
         if b ~= a and b.plane == a.plane and b.name == a.name
             and b.block == 2 and b.hidden ~= a.hidden
@@ -67,8 +103,9 @@ end
 -- nearbyLocs:    All nearby Locs, used to detect paired object states.
 --
 -- CENTER blocking is handled separately from directional blocking:
--- CENTER can be cleared independently, while stale directional-only
--- collision is cleared entirely when a matching Loc state is found.
+-- CENTER can be cleared independently, while stale directional
+-- collision is removed selectively based on Loc shape and rotation.
+-- Unrelated directional and corner flags are preserved.
 function M.effectiveFlags(rawFlags, footprintLocs, originLocs, nearbyLocs)
 
     -- hiddenLoc tells us if there is stale CENTER blocking to be removed
@@ -95,19 +132,28 @@ function M.effectiveFlags(rawFlags, footprintLocs, originLocs, nearbyLocs)
         end
 
     -- Case 2: Static tile has directional/corner blocking but no CENTER.
-    -- Clear static blocking when an origin Loc indicates it is stale:
-    --   - Visible nonblocking Loc (blockWalk = 0)
-    --   - Hidden blocking Loc (blockWalk = 1)
-    --   - blockWalk = 2 Loc with an opposite-hidden same-name counterpart
+    -- Clear static blocking when an origin Loc indicates it is stale
+    -- TODO: Elseif -> if; in the rare case that a tile has both central and directional collision.
     elseif rawFlags ~= 0 then
         for _, loc in ipairs(originLocs) do
-            if loc.isActive == true and (
-                (loc.block == 0 and loc.hidden == false)
-                or (loc.hidden == true and loc.block == 1)
-                or (loc.block == 2 and sameNameOppositeHidden(loc, nearbyLocs)) -- Doors
-            ) then
-                effective = 0
-                break
+            if loc.isActive == true and loc.hidden == true then
+                -- if the loc is active, hidden and is blockWalk = 1 (hidden blocking loc)
+                -- or blockWalk = 2 with an opposite-hidden same-name counterpart (how doors work)
+                -- then mark the loc as stale.
+                local stale = (
+                    loc.block == 1
+                    or (
+                        loc.block == 2
+                        and sameNameOppositeHidden(loc, nearbyLocs)
+                    )
+                )
+                -- if the loc is stale, get the mask and NOT it to remove collision 
+                -- ONLY in the cached direction (the direction it used to block)
+                if stale then
+                    local mask = staleDirectionalMask(loc)
+
+                    effective = effective & (~mask)
+                end
             end
         end
     end
