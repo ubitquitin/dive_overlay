@@ -100,10 +100,6 @@ Some areas on Runescape like Dungeoneering and ROTS created "random" instances b
 
 Runescape does not (yet) expose the dynamic collision data through the API. Hopefully, if this is added, the plugin can become more reliable. This means that when obstacles like barriers dissappear, doors open & close, or wildy spiderwebs get cut, the state of collisions and movement change and deviate from the cached data.
 
-Here is a diagram of the most up to date logic regarding the transformation from the static collision data to the finalized dynamic collision map. These heuristics aim to approximate what we see in game.
-
-![Collision Logic](images/collisionlogic1.png)
-
 #### Obstacles ADDING collisions
 
 LocTypes have a few important properties.
@@ -152,7 +148,6 @@ So if a nearby LocType has `isHidden = False` and `blockWalk != 0`, then I modif
 | WALL_L_ALT |  23   | Never adds collision |
 | WALLDECOR_DIAGONAL_BOTH_ALT        |   24   | Decor should never add collision |
 
-Ultimately these are just heuristics and exceptions will likely happen when playing the game.
 
 #### Obstacles REMOVING collisions
 
@@ -161,6 +156,12 @@ Think about cutting a spiderweb in the wilderness or the ROTS entry barriers dis
 Currently I have a simple rule that I found to be consistent among most of my test cases. Block walk does not matter here, because LocType entities can have various blockWalk behavior depending on how the player interacts with them. (E.g. the first ROTS barrier is blockwalk=1 since the player cannot pass without pads being filled. The second ROTS barrier is blockwalk=0, since the player can always just left click to pass through it.) What ended up being consistent for me was:
 `isHidden=True & (isActive=True | blockWalk=1)`. If this evaluates true, I remove the cached CENTER collision from its footprint, provided there is no overlapping visible Loc that independently contributes CENTER collision.
 When directional blocking Locs like doors change, then the original configuration becomes hidden, and therefore collision is removed. `isHidden=True & (blockWalk = 1 | blockWalk = 2 & sameName,opposite Hidden state Loc adjacent)` signifies a rotated door that should be removed as no longer blocking.
+
+Here is a diagram of the most up to date logic regarding the transformation from the static collision data to the finalized dynamic collision map. These heuristics aim to approximate what we see in game.
+
+![Collision Logic](images/collisionlogic1.png)
+
+Ultimately these are just heuristics and exceptions will likely happen when playing the game.
 
 
 #### Failure Modes
