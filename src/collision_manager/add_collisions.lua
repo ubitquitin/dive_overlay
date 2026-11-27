@@ -2,7 +2,7 @@
 -- Shape heuristics are experimental: do not silently broaden them.
 local M = {}
 local CENTER = 1
-local specialCases = require("src/collision_manager/special_cases")
+local blockedLocs = require("data/blocking_locs")
 local function key(a,b,c) return string.format('%d_%d_%d',a,b,c) end
 
 -- door rotation mapping
@@ -24,27 +24,41 @@ local CARDINAL = 2 | 4 | 8 | 16
 -- Return only the collision a *visible* dynamic Loc contributes.
 -- For shapes 1/3 and decorative/roof shapes we deliberately add nothing.
 function M.addedCollisionMask(loc)
-    -- If the location is hidden or it does not block walks then dont add collision mask
-    if loc.hidden ~= false or (loc.block ~= 1 and loc.block ~= 2) then
+    -- Hidden Locs never contribute dynamic collision additions.
+    if loc.hidden ~= false then
         return 0
     end
+
+    -- A Loc may block movement according to either the live API
+    -- or the cached blocks_movement property.
+    local liveBlocking = loc.block == 1 or loc.block == 2
+    -- If the live state and cached param of the loc both dont say blocking
+    -- then don't add any collision.
+    if not liveBlocking and not blockedLocs.contains(loc.id) then 
+        return 0
+    end
+
     local shape = loc.shape
+    -- Directional collision resolution:
     -- If the location is 0 (door) then return the mapped block direction (not central blocking)
     if shape == 0 then
         if loc.rotation == nil then return 0 end
         return WALL_BY_ROTATION[loc.rotation % 4] or 0
+
     -- If the location is 2 (L-shape) then return the mapped block direction
     elseif shape == 2 then
         if loc.rotation == nil then return 0 end
-        return WALL_BY_ROTATION[loc.rotation % 4] or 0
+        return LWALL_BY_ROTATION[loc.rotation % 4] or 0
+
     -- For ground decoration, enforce that blockWalk = 1
     elseif (shape == 22 and loc.block == 1) then
         return CENTER
-    -- Shape 10 MultiLocs with blockWalk = 2 may inherit nonblocking collision behaviour from their parent.
-    elseif shape == 10 and loc.block == 2 and loc.isMultiLoc == true and loc.parentBlock == 0 then
-        return 0
-    -- Otherwise return central blocking for the respective remaining shapes
+
+    -- Scenery shapes
     elseif shape == 9 or shape == 10 or shape == 11 then
+        -- Scenery MultiLocs with blockWalk = 2 may inherit nonblocking collision behaviour from their parent.
+        if loc.block == 2 and loc.isMultiLoc == true and loc.parentBlock == 0 then return 0 end
+        -- Scenery shapes add collision
         return CENTER
     end
 
@@ -64,33 +78,6 @@ function M.addVisibleWallEdges(locs, effectiveByTile)
             local k = key(loc.x, loc.z, loc.plane)
             if effectiveByTile[k] ~= nil then
                 effectiveByTile[k] = effectiveByTile[k] | mask
-            end
-        end
-    end
-end
-
-
--- Edge case collision addition. Objects with blockwalk=0 but that do block.
--- Mark the occupied footprint of a visible, explicitly server-blocking Loc.
--- Entity width/length are already world-oriented, as in the Loc inspector.
-function M.applyServerBlockingLocs(locs, effectiveByTile)
-    for _,loc in ipairs(locs) do
-        -- If the loc id is in our list of exceptions, set rule to true
-        local rule = specialCases.serverBlockingLocs[loc.id]
-        -- If there is an exception loc (regardless of if it's hidden)
-        -- add center blocking to all tiles it occupies.
-        --if rule and loc.hidden == false then
-        if rule then
-            local width = math.max(1, math.floor(loc.width or 1))
-            local length = math.max(1, math.floor(loc.length or 1))
-            if not rule.footprint then width, length = 1, 1 end
-            for dx = 0, width - 1 do
-                for dz = 0, length - 1 do
-                    local k = key(loc.x + dx, loc.z + dz, loc.plane)
-                    if effectiveByTile[k] ~= nil then
-                        effectiveByTile[k] = effectiveByTile[k] | CENTER
-                    end
-                end
             end
         end
     end

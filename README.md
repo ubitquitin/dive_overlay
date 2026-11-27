@@ -29,8 +29,10 @@ dive_overlay/
 ├── main.lua                                # The main entrypoint
 ├── plugin.json                             # Plugin metadata
 ├── README.md                               # What you're reading right. now.
-├── maps/                                   # Encoded compressed collision data
-│   └── ...
+├── data/                                   
+│   ├── maps/                               # Encoded compressed collision data
+│   │   └── ...
+│   └── blocking_locs.lua                   # Bitmap of world objects from cache that block movement
 ├── src/
 │   ├── active_tiles.lua                    # Maintains the state of the tiles around the player
 │   ├── debouncer.lua                       # Rate limits changes to opacity renderings
@@ -55,6 +57,18 @@ dive_overlay/
 
 ## How it Works
 
+For below, we define a map CHUNK as a 64x64 tile region of collision data. We define a map ZONE as an 8x8 subset of a given map chunk. Procedurally generated areas in Runescape will sample 8x8 zones within a source chunk and rotate them randomly to create a "random" looking area.
+
+The Plugin works by doing the following:
+
+1. On plugin startup, and whenever RegionCreated or [RegionUpdated](https://developer.runescape.com/rs/core/events.html?h=zone#regionupdated) fires, the plugin checks whether the player is in an instance and whether that instance is procedural (e.g., ROTS, Dungeoneering). Procedural instances are identified by examining the source mappings and rotations of neighboring zones.
+2. Whenever the player enters a new map ZONE, the plugin checks for what new collision data is needed by observing all map source CHUNKS that intersect with a 32-tile radius around the player.
+- Overworld and non-procedural instances: Load any missing 64x64 map chunks intersecting the radius, reusing previously cached data.
+- Procedural instances: Resolve the source coordinates and rotation of the surrounding 8x8 ZONES (up to 32 tiles away), in order to properly cache and apply rotatiosn to the collision data. Rotation is resolved by checking movement in the source chunk relative to movement in the randomly rotated map zone.
+3. Applies Dynamic collision ADDITION and REMOVAL based on [LocTypes](https://developer.runescape.com/rs/game/config/loctype.html) present.
+4. Runs isDiveable() on the 21x21 region of tiles around the player given the finalized collision grid.
+
+
 ### Dive Algorithm
 Dive (and surge/escape) validate locations by moving towards the targetted tile, checking diagonally, then E/W, then N/S until either the tile is reached, or the pathing gets stuck due to collision with obstacles. Specifically, for each step until the algorithm reaches the target or stalls out, it does the following:
 
@@ -73,18 +87,8 @@ This was implemented in the `isDiveable()` method.
 
 ### Collision Data
 
-Runescape cached collision data was downloaded using [this tool](https://github.com/skillbert/rsmv). The collision data keeps a static state of where players can and cannot walk in the game. This data was encoded and compressed into what is now in the `maps/` directory.
+Runescape cached collision data was downloaded using [this tool](https://github.com/skillbert/rsmv). The collision data keeps a static state of where players can and cannot walk in the game. This data was encoded and compressed into what is now in the `data/maps/` directory. A bitmap was also constructed from the cache for the locEntity ids with parameter `blocks_movement = True`. Full details of this process and utility scripts used can be found [here](https://github.com/ubitquitin/rsmv/blob/collision-export/COLLISION_EXPORT.md).
 
-For below, we define a map CHUNK as a 64x64 tile region of collision data. We define a map ZONE as an 8x8 subset of a given map chunk. Procedurally generated areas in Runescape will sample 8x8 zones within a source chunk and rotate them randomly to create a "random" looking area.
-
-The Plugin works by doing the following:
-
-1. On plugin startup, and whenever RegionCreated or [RegionUpdated](https://developer.runescape.com/rs/core/events.html?h=zone#regionupdated) fires, the plugin checks whether the player is in an instance and whether that instance is procedural (e.g., ROTS, Dungeoneering). Procedural instances are identified by examining the source mappings and rotations of neighboring zones.
-2. Whenever the player enters a new map ZONE, the plugin checks for what new collision data is needed by observing all map source CHUNKS that intersect with a 32-tile radius around the player.
-- Overworld and non-procedural instances: Load any missing 64x64 map chunks intersecting the radius, reusing previously cached data.
-- Procedural instances: Resolve the source coordinates and rotation of the surrounding 8x8 ZONES (up to 32 tiles away), in order to properly cache and apply rotatiosn to the collision data. Rotation is resolved by checking movement in the source chunk relative to movement in the randomly rotated map zone.
-3. Applies Dynamic collision ADDITION and REMOVAL based on [LocTypes](https://developer.runescape.com/rs/game/config/loctype.html) present.
-4. Runs isDiveable() on the 21x21 region of tiles around the player given the finalized collision grid.
 
 ### Procedurally generated areas
 
@@ -97,8 +101,6 @@ Some areas on Runescape like Dungeoneering and ROTS created "random" instances b
 Runescape does not (yet) expose the dynamic collision data through the API. Hopefully, if this is added, the plugin can become more reliable. This means that when obstacles like barriers dissappear, doors open & close, or wildy spiderwebs get cut, the state of collisions and movement change and deviate from the cached data.
 
 #### Obstacles ADDING collisions
-
-*Note: I am aware of LocAdded and LocRemoved events, these may be a more performant way of detecting changes than my current sampling that I hope to test.*
 
 LocTypes have a few important properties.
 
@@ -146,7 +148,6 @@ So if a nearby LocType has `isHidden = False` and `blockWalk != 0`, then I modif
 | WALL_L_ALT |  23   | Never adds collision |
 | WALLDECOR_DIAGONAL_BOTH_ALT        |   24   | Decor should never add collision |
 
-Ultimately these are just heuristics and exceptions will likely happen when playing the game.
 
 #### Obstacles REMOVING collisions
 
@@ -154,7 +155,13 @@ Think about cutting a spiderweb in the wilderness or the ROTS entry barriers dis
 
 Currently I have a simple rule that I found to be consistent among most of my test cases. Block walk does not matter here, because LocType entities can have various blockWalk behavior depending on how the player interacts with them. (E.g. the first ROTS barrier is blockwalk=1 since the player cannot pass without pads being filled. The second ROTS barrier is blockwalk=0, since the player can always just left click to pass through it.) What ended up being consistent for me was:
 `isHidden=True & (isActive=True | blockWalk=1)`. If this evaluates true, I remove the cached CENTER collision from its footprint, provided there is no overlapping visible Loc that independently contributes CENTER collision.
-When directional blocking Locs like doors change, then the original configuration becomes hidden, and therefore collision is removed. `isHidden=True & (shape = 0 | blockWalk > 0)` signifies a rotated door that should be removed as no longer blocking.
+When directional blocking Locs like doors change, then the original configuration becomes hidden, and therefore collision is removed. `isHidden=True & (blockWalk = 1 | blockWalk = 2 & sameName,opposite Hidden state Loc adjacent)` signifies a rotated door that should be removed as no longer blocking.
+
+Here is a diagram of the most up to date logic regarding the transformation from the static collision data to the finalized dynamic collision map. These heuristics aim to approximate what we see in game.
+
+![Collision Logic](images/collisionlogic1.png)
+
+Ultimately these are just heuristics and exceptions will likely happen when playing the game.
 
 
 #### Failure Modes
@@ -183,7 +190,7 @@ We use a debouncer to rate limit changes with the opacity sliders.
 
 ## TODOs
 - Better compress data, and automate cache updates to collision data in some way? https://github.com/ThirdAgeStudio/rs3-collision-map
-- Replace heuristics with collisionGrid API if Jagex exposes it. (Remove any and all hardcoding!)
+- Replace heuristics with collisionGrid API if Jagex exposes it.
 - If Jagex exposes zone rotation, use that API rather than the current inference pattern.
 
 ## Issues
